@@ -162,6 +162,7 @@ resource "aws_lambda_function" "chat_fulfillment" {
       GUARDRAIL_VERSION  = module.bedrock_guardrail.guardrail_version
       CONTEXT_TABLE_NAME = aws_dynamodb_table.conversation_context.name
       MCP_FUNCTION_NAME  = aws_lambda_function.mcp_server.function_name
+      QUEUE_MAP          = jsonencode({ for k, v in aws_connect_queue.queues : k => v.arn })
     }
   }
 }
@@ -188,6 +189,7 @@ resource "aws_lambda_function" "voice_orchestrator" {
       MCP_FUNCTION_NAME   = aws_lambda_function.mcp_server.function_name
       FEEDBACK_TABLE_NAME = aws_dynamodb_table.hallucination_feedback.name
       CONTEXT_TABLE_NAME  = aws_dynamodb_table.conversation_context.name
+      QUEUE_MAP           = jsonencode({ for k, v in aws_connect_queue.queues : k => v.arn })
     }
   }
 }
@@ -325,14 +327,11 @@ resource "aws_lexv2models_slot_type" "department" {
   locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
   name        = "DepartmentType"
   
-  slot_type_values {
-    sample_value { value = "Sales" }
-  }
-  slot_type_values {
-    sample_value { value = "Support" }
-  }
-  slot_type_values {
-    sample_value { value = "Billing" }
+  dynamic "slot_type_values" {
+    for_each = var.connect_queues
+    content {
+      sample_value { value = slot_type_values.key }
+    }
   }
   
   value_selection_setting {
@@ -370,7 +369,7 @@ resource "aws_lexv2models_slot" "department" {
       message_group {
         message {
           plain_text_message {
-            value = "Which department would you like to speak with? Sales, Support, or Billing?"
+            value = "Which department would you like to speak with? ${join(", ", keys(var.connect_queues))}?"
           }
         }
       }
@@ -466,34 +465,16 @@ data "aws_connect_hours_of_operation" "default" {
   name        = "Basic Hours"
 }
 
-# Create Queues
-resource "aws_connect_queue" "sales" {
-  instance_id           = aws_connect_instance.this.id
-  name                  = "Sales"
-  description           = "Sales Department Queue"
-  hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
-  tags = {
-    Department = "Sales"
-  }
-}
+# Create Queues Dynamically
+resource "aws_connect_queue" "queues" {
+  for_each = var.connect_queues
 
-resource "aws_connect_queue" "support" {
   instance_id           = aws_connect_instance.this.id
-  name                  = "Support"
-  description           = "Customer Support Queue"
+  name                  = each.key
+  description           = each.value.description
   hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
   tags = {
-    Department = "Support"
-  }
-}
-
-resource "aws_connect_queue" "billing" {
-  instance_id           = aws_connect_instance.this.id
-  name                  = "Billing"
-  description           = "Billing & Payments Queue"
-  hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
-  tags = {
-    Department = "Billing"
+    Department = each.key
   }
 }
 
@@ -506,11 +487,9 @@ resource "aws_connect_contact_flow" "nova_sonic_ivr" {
   name         = "Nova Sonic Intelligent IVR"
   description  = "Main entry point using Nova Sonic with Lex Fallback"
   type         = "CONTACT_FLOW"
-  content      = templatefile("${path.module}/contact_flows/nova_sonic_ivr.json.tftpl", {
+  content      = templatefile(var.contact_flow_template_file, {
     voice_lambda_arn   = aws_lambda_function.voice_orchestrator.arn
-    sales_queue_arn    = aws_connect_queue.sales.arn
-    support_queue_arn  = aws_connect_queue.support.arn
-    billing_queue_arn  = aws_connect_queue.billing.arn
+    queues             = { for k, v in aws_connect_queue.queues : k => v.arn }
     lex_bot_name       = aws_lexv2models_bot.chat_bot.name
     lex_bot_alias_arn  = awscc_lex_bot_alias.prod.arn
   })

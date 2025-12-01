@@ -484,33 +484,42 @@ To ensure high availability, the system implements a **Resilient Fallback Patter
     *   It signals Amazon Connect (via a specific intent or attribute) to loop back to the **Voice Path**.
 3.  **Seamless Handoff**: The contact re-enters the `Voice Orchestrator`, which reads the updated context and resumes the session using Nova Sonic's superior voice capabilities.
 
-```text
-       [Connect]
-           |
-           v
-    (Try Nova Sonic) ----(Success)----> [Voice Orchestrator] <---> [Nova Sonic]
-           |                                     |
-        (Error)                               (Failure)
-           |                                     |
-           v                                     v
-    [Fallback Flow] <---(Save Context)--- [Context DB]
-           |
-           v
-      [Lex Bot] <----(Restore Context)
-           |
-           v
-    (Check Availability) --(Available?)--> [Signal Recovery]
-                                                 |
-                                                 v
-                                          (Loop to Start)
-```
+## Developer Workflow: Contact Flow Automation
 
-### Feature Parity in Fallback (Zero Trust)
+To streamline the development and deployment of Amazon Connect Contact Flows, we have implemented an **Infrastructure-as-Code (IaC)** approach with automated deployment pipelines.
 
-Even when operating in **Fallback Mode (Lex)**, the system maintains full feature parity and security:
+### 1. Externalized Contact Flow Logic
+Instead of embedding complex JSON strings inside Terraform resource blocks, the Contact Flow logic is maintained in a dedicated, readable template file:
+*   **Path**: `connect_nova_sonic_hybrid/contact_flows/nova_sonic_ivr.json.tftpl`
+*   **Format**: JSON with Terraform interpolation (e.g., `${voice_lambda_arn}`).
+*   **Benefit**: This allows developers to edit the flow structure cleanly without fighting Terraform syntax escaping.
 
-1.  **Content Moderation**: The `Chat Fulfillment` Lambda continues to enforce **Bedrock Guardrails** on all text inputs and outputs, ensuring safety policies are applied regardless of the channel.
-2.  **Tool Use (MCP)**: The `Chat Fulfillment` Lambda is granted explicit, least-privilege permission to invoke the **MCP Server Lambda**. This allows the text bot to perform the same backend actions (e.g., `update_address`) as the voice bot.
-3.  **Zero Trust Security**:
-    *   **Identity Propagation**: The user's identity and context are securely passed via DynamoDB.
-    *   **Scoped Permissions**: The Chat Lambda can *only* invoke the specific MCP function and *only* access the specific Context table. It cannot access other resources or functions.
+### 2. Auto-Deployment Mechanisms
+We provide two methods to deploy changes to the Contact Flows instantly, bypassing the full infrastructure update cycle.
+
+#### Option A: GitHub Actions (CI/CD)
+*   **Trigger**: Push changes to any file in `connect_nova_sonic_hybrid/contact_flows/**`.
+*   **Workflow**: `.github/workflows/deploy_contact_flows.yml`
+*   **Action**:
+    1.  Detects changes to the contact flow templates.
+    2.  Authenticates with AWS (`eu-west-2`).
+    3.  Runs `terraform apply -target=aws_connect_contact_flow.nova_sonic_ivr`.
+    4.  Updates the flow in Amazon Connect automatically.
+
+#### Option B: Local Deployment Script
+For rapid iteration during development, use the provided shell script:
+*   **Script**: `./deploy_flows.sh`
+*   **Usage**:
+    ```bash
+    # Make executable (first time only)
+    chmod +x deploy_flows.sh
+    
+    # Run deployment
+    ./deploy_flows.sh
+    ```
+*   **Action**: Runs the targeted Terraform apply locally, updating the Contact Flow in seconds.
+
+### 3. Zero Trust & Feature Parity Maintenance
+When modifying Contact Flows, ensure that:
+*   **Permissions**: Any new Lambda functions invoked must have explicit `lambda:InvokeFunction` permissions granted to the Connect instance.
+*   **Fallback Parity**: If you add a new intent or capability to the Nova Sonic path (e.g., a new queue transfer), you **must** also update the **Amazon Lex V2** bot to handle the same intent, ensuring the fallback path remains functional.

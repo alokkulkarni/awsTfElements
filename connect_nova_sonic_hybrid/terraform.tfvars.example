@@ -1,0 +1,55 @@
+# -------------------------------------------------------------------------
+# Sample Terraform Variables File
+# Rename this file to 'terraform.tfvars' to use it.
+# -------------------------------------------------------------------------
+
+# AWS Region where resources will be deployed
+aws_region = "eu-west-2"
+
+# Project Name (used for naming resources like Lambdas, Buckets, etc.)
+project_name = "connect-nova-sonic-hybrid"
+
+# -------------------------------------------------------------------------
+# Environment and Tagging
+# -------------------------------------------------------------------------
+environment = "dev"
+
+tags = {
+  Environment = "dev"
+  Project     = "connect-nova-sonic-hybrid"
+  Owner       = "DevOps"
+  CostCenter  = "IT"
+}
+
+# -------------------------------------------------------------------------
+# Amazon Connect Queues
+# -------------------------------------------------------------------------
+# Define the queues you want to create in Amazon Connect.
+# These will automatically be:
+# 1. Created in Connect
+# 2. Added to the Lex Chatbot "Department" slot
+# 3. Added to the Lambda routing logic
+connect_queues = {
+  "Sales" = {
+    description = "Sales Department Queue"
+  }
+  "Support" = {
+    description = "Customer Support Queue"
+  }
+  "Billing" = {
+    description = "Billing & Payments Queue"
+  }
+  "Returns" = {
+    description = "Product Returns and Refunds"
+  }
+  "Technical" = {
+    description = "Level 2 Technical Support"
+  }
+}
+
+# -------------------------------------------------------------------------
+# Contact Flow Template
+# -------------------------------------------------------------------------
+# Path to your exported and templatized Contact Flow JSON.
+# See DEPLOYMENT_GUIDE.md for instructions on how to create this file.
+contact_flow_template_file = "contact_flows/nova_sonic_ivr.json.tftpl"

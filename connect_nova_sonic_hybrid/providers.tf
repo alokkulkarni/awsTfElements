@@ -13,20 +13,15 @@ terraform {
   # -------------------------------------------------------------------------
   # Remote State Configuration (S3 Backend)
   # -------------------------------------------------------------------------
-  # Uncomment and configure the following block to enable remote state storage.
-  # This ensures state is stored securely in S3 and locked via DynamoDB.
-  
-  backend "s3" {
-    bucket         = "live-chat-content-moderation-tf-state-bucket"
-    key            = "connect-nova-sonic-hybrid/terraform.tfstate"
-    region         = "eu-west-2"
-    dynamodb_table = "live-chat-content-moderation-tf-locks"
-    encrypt        = true
-  }
+  # Partial configuration: Details are passed via -backend-config in CI/CD
+  backend "s3" {}
 }
 
 provider "aws" {
   region = var.aws_region
+  default_tags {
+    tags = var.tags
+  }
 }
 
 provider "awscc" {

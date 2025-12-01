@@ -7,6 +7,29 @@ export const handler = async (event) => {
 
   const intentName = event.sessionState.intent.name;
   const userMessage = event.inputTranscript;
+  const queueMap = JSON.parse(process.env.QUEUE_MAP || '{}');
+
+  if (intentName === "TalkToAgent") {
+    const departmentSlot = event.sessionState.intent.slots.Department;
+    const department = departmentSlot ? departmentSlot.value.originalValue : null;
+
+    if (department && queueMap[department]) {
+        // Valid department, set session attribute for Connect
+        return {
+            sessionState: {
+                dialogAction: { type: "Close" },
+                intent: { name: intentName, state: "Fulfilled" },
+                sessionAttributes: {
+                    "TargetQueue": department,
+                    "TargetQueueArn": queueMap[department]
+                }
+            },
+            messages: [{ contentType: "PlainText", content: `Transferring you to ${department}...` }]
+        };
+    } else {
+        return close(event, `Sorry, I couldn't find a queue for ${department}. Available departments are: ${Object.keys(queueMap).join(", ")}.`);
+    }
+  }
 
   if (intentName === "FallbackIntent") {
     return close(event, "I'm sorry, I didn't understand that. Could you please repeat?");

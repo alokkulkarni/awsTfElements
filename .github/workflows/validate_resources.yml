@@ -1,0 +1,51 @@
+name: Validate Resources
+
+on:
+  push:
+    paths:
+      - 'resources/**'
+  pull_request:
+    paths:
+      - 'resources/**'
+  workflow_dispatch:
+
+jobs:
+  validate-and-scan:
+    name: Validate and Scan Resources
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive resources/
+
+      - name: Initialize and Validate Modules
+        run: |
+          # Iterate through subdirectories in resources/ and validate them
+          for dir in resources/*/; do
+            if [ -f "$dir/main.tf" ] || [ -f "$dir/versions.tf" ]; then
+              echo "Validating $dir..."
+              cd "$dir"
+              terraform init -backend=false
+              terraform validate
+              cd - > /dev/null
+            fi
+          done
+
+      - name: Run Checkov Security Scan
+        run: |
+          checkov --directory resources/ --framework terraform --soft-fail

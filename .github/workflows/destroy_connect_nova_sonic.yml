@@ -1,0 +1,94 @@
+name: Destroy Connect Nova Sonic Hybrid
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment (dev, prod, etc.)'
+        required: true
+        default: 'dev'
+      project_name:
+        description: 'Project Name'
+        required: true
+        default: 'connect-nova-sonic-hybrid'
+      owner:
+        description: 'Owner Tag'
+        required: true
+        default: 'DevOps'
+      cost_center:
+        description: 'Cost Center Tag'
+        required: true
+        default: 'IT'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  TF_WORKING_DIR: connect_nova_sonic_hybrid
+  TF_STATE_BUCKET: "live-chat-content-moderation-tf-state-bucket"
+  TF_LOCK_TABLE: "live-chat-content-moderation-tf-locks"
+  # TF_STATE_KEY will be set dynamically based on inputs
+
+jobs:
+  destroy:
+    name: Destroy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set Dynamic Environment Variables
+        id: set-env
+        run: |
+          # Determine values (use inputs if available, else defaults)
+          ENV_VAL="${{ github.event.inputs.environment || 'dev' }}"
+          PROJ_VAL="${{ github.event.inputs.project_name || 'connect-nova-sonic-hybrid' }}"
+          OWNER_VAL="${{ github.event.inputs.owner || 'DevOps' }}"
+          COST_VAL="${{ github.event.inputs.cost_center || 'IT' }}"
+          
+          echo "ENVIRONMENT=$ENV_VAL" >> $GITHUB_ENV
+          echo "PROJECT_NAME=$PROJ_VAL" >> $GITHUB_ENV
+          echo "OWNER=$OWNER_VAL" >> $GITHUB_ENV
+          echo "COST_CENTER=$COST_VAL" >> $GITHUB_ENV
+          
+          # Set State Key based on Environment
+          echo "TF_STATE_KEY=connect-nova-sonic-hybrid/$ENV_VAL/terraform.tfstate" >> $GITHUB_ENV
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Prepare Variables
+        run: |
+          if [ -f "terraform.tfvars.example" ]; then
+            cp terraform.tfvars.example terraform.tfvars
+          fi
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ env.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ env.TF_STATE_KEY }}" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.TF_LOCK_TABLE }}" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Destroy
+        run: |
+          terraform destroy -auto-approve \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="project_name=${{ env.PROJECT_NAME }}" \
+            -var="tags={Environment=\"${{ env.ENVIRONMENT }}\", Project=\"${{ env.PROJECT_NAME }}\", Owner=\"${{ env.OWNER }}\", CostCenter=\"${{ env.COST_CENTER }}\"}"

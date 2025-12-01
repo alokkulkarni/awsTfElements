@@ -8,6 +8,10 @@ const client = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 
 export const handler = async (event) => {
   console.log("Received Voice Stream Event:", JSON.stringify(event, null, 2));
+  
+  // Available Queues for Routing Logic
+  const queueMap = JSON.parse(process.env.QUEUE_MAP || '{}');
+  console.log("Available Queues:", Object.keys(queueMap));
 
   // Simulated Audio Input (Base64) from Connect
   const audioChunk = event.audioChunk; 

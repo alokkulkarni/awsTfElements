@@ -45,30 +45,20 @@
       "Transitions": {
         "NextAction": "Disconnect",
         "Conditions": [
-          { "NextAction": "TransferSales", "Condition": { "Operator": "Equals", "Operands": ["Sales"] } },
-          { "NextAction": "TransferSupport", "Condition": { "Operator": "Equals", "Operands": ["Support"] } },
-          { "NextAction": "TransferBilling", "Condition": { "Operator": "Equals", "Operands": ["Billing"] } }
+          %{ for index, name in keys(queues) ~}
+          { "NextAction": "Transfer${name}", "Condition": { "Operator": "Equals", "Operands": ["${name}"] } }${ index < length(queues) - 1 ? "," : "" }
+          %{ endfor ~}
         ]
       }
     },
+    %{ for name, arn in queues ~}
     {
-      "Identifier": "TransferSales",
+      "Identifier": "Transfer${name}",
       "Type": "TransferToQueue",
-      "Parameters": { "QueueId": "${sales_queue_arn}" },
+      "Parameters": { "QueueId": "${arn}" },
       "Transitions": { "NextAction": "Disconnect", "Errors": [{ "NextAction": "Disconnect", "ErrorType": "NoMatchingError" }] }
     },
-    {
-      "Identifier": "TransferSupport",
-      "Type": "TransferToQueue",
-      "Parameters": { "QueueId": "${support_queue_arn}" },
-      "Transitions": { "NextAction": "Disconnect", "Errors": [{ "NextAction": "Disconnect", "ErrorType": "NoMatchingError" }] }
-    },
-    {
-      "Identifier": "TransferBilling",
-      "Type": "TransferToQueue",
-      "Parameters": { "QueueId": "${billing_queue_arn}" },
-      "Transitions": { "NextAction": "Disconnect", "Errors": [{ "NextAction": "Disconnect", "ErrorType": "NoMatchingError" }] }
-    },
+    %{ endfor ~}
     {
       "Identifier": "PlayFallbackPrompt",
       "Type": "MessageParticipant",
