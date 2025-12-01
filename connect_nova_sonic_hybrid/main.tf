@@ -153,7 +153,8 @@ resource "aws_iam_role_policy" "lambda_voice_policy" {
         ]
         Resource = [
           aws_dynamodb_table.hallucination_feedback.arn,
-          aws_dynamodb_table.conversation_context.arn
+          aws_dynamodb_table.conversation_context.arn,
+          aws_dynamodb_table.faq_cache.arn
         ]
       }
     ]
@@ -190,6 +191,7 @@ resource "aws_lambda_function" "chat_fulfillment" {
       BOT_VERSION        = "DRAFT"
       LOCALE_ID          = var.locale
       INTENT_ID          = aws_lexv2models_intent.talk_to_agent.intent_id
+      FAQ_CACHE_TABLE    = aws_dynamodb_table.faq_cache.name
     }
   }
 }
@@ -471,6 +473,26 @@ resource "aws_lambda_permission" "lex_invoke_chat" {
   function_name = aws_lambda_function.chat_fulfillment.function_name
   principal     = "lex.amazonaws.com"
   source_arn    = awscc_lex_bot_alias.prod.arn
+}
+
+resource "aws_dynamodb_table" "faq_cache" {
+  name         = "${var.project_name}-faq-cache"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "QuestionHash"
+
+  attribute {
+    name = "QuestionHash"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "TTL"
+    enabled        = true
+  }
+
+  tags = merge(var.tags, {
+    Purpose = "Cache for Common FAQ Answers"
+  })
 }
 
 resource "aws_dynamodb_table" "conversation_context" {

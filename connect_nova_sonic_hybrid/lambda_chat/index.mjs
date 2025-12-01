@@ -1,8 +1,11 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { LexModelsV2Client, DescribeIntentCommand, UpdateIntentCommand, BuildBotLocaleCommand } from "@aws-sdk/client-lex-models-v2";
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { createHash } from "crypto";
 
 const client = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 const lexClient = new LexModelsV2Client({ region: process.env.AWS_REGION });
+const dynamoClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 export const handler = async (event) => {
   console.log("Received event:", JSON.stringify(event, null, 2));
@@ -10,6 +13,7 @@ export const handler = async (event) => {
   const intentName = event.sessionState.intent.name;
   const userMessage = event.inputTranscript;
   const queueMap = JSON.parse(process.env.QUEUE_MAP || '{}');
+  const faqCacheTable = process.env.FAQ_CACHE_TABLE;
 
   if (intentName === "TalkToAgent") {
     const departmentSlot = event.sessionState.intent.slots.Department;
@@ -36,6 +40,24 @@ export const handler = async (event) => {
   // Fallback Intent: Use Bedrock for Classification or QA
   if (intentName === "FallbackIntent") {
     try {
+      // 1. Check Cache
+      const questionHash = createHash('sha256').update(userMessage.toLowerCase().trim()).digest('hex');
+      if (faqCacheTable) {
+        try {
+          const cached = await dynamoClient.send(new GetItemCommand({
+            TableName: faqCacheTable,
+            Key: { QuestionHash: { S: questionHash } }
+          }));
+          
+          if (cached.Item && cached.Item.Answer && cached.Item.TTL && cached.Item.TTL.N > Math.floor(Date.now() / 1000)) {
+            console.log("Cache Hit! Returning cached answer.");
+            return close(event, cached.Item.Answer.S);
+          }
+        } catch (cacheErr) {
+          console.warn("Cache lookup failed:", cacheErr);
+        }
+      }
+
       const departments = Object.keys(queueMap).join(", ");
       const prompt = `You are an intelligent intent classifier for a customer service bot. 
       The available departments are: ${departments}.
@@ -101,6 +123,27 @@ export const handler = async (event) => {
 
       } else {
         // It's a general answer
+        
+        // 2. Cache the answer (Optional: Only if it looks like a valid FAQ answer)
+        // For now, we cache everything that isn't a department transfer
+        if (faqCacheTable) {
+            try {
+                const ttl = Math.floor(Date.now() / 1000) + (24 * 60 * 60); // 24 hours
+                await dynamoClient.send(new PutItemCommand({
+                    TableName: faqCacheTable,
+                    Item: {
+                        QuestionHash: { S: questionHash },
+                        Question: { S: userMessage.substring(0, 1000) }, // Store original for debugging
+                        Answer: { S: completion },
+                        TTL: { N: ttl.toString() }
+                    }
+                }));
+                console.log("Cached answer for future use.");
+            } catch (cacheWriteErr) {
+                console.warn("Cache write failed:", cacheWriteErr);
+            }
+        }
+
         return close(event, completion);
       }
 
