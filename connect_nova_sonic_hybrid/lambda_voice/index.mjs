@@ -17,13 +17,15 @@ export const handler = async (event) => {
   const audioChunk = event.audioChunk; 
 
   try {
+    const locale = process.env.LOCALE || 'en_US';
     const input = {
       modelId: "amazon.nova-sonic-v1:0", // Hypothetical Model ID for Nova Sonic
       contentType: "application/json",
       accept: "application/json",
       body: JSON.stringify({
         audio: audioChunk,
-        stream: true // Enable bidirectional streaming
+        stream: true, // Enable bidirectional streaming
+        locale: locale
       }),
       guardrailIdentifier: process.env.GUARDRAIL_ID,
       guardrailVersion: process.env.GUARDRAIL_VERSION,

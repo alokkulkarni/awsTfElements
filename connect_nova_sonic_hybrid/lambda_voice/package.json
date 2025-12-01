@@ -1,0 +1,10 @@
+{
+  "name": "lambda-voice",
+  "version": "1.0.0",
+  "description": "Voice Orchestrator Lambda for Connect Nova Sonic Hybrid",
+  "main": "index.mjs",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.400.0"
+  }
+}

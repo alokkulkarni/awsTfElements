@@ -1,0 +1,12 @@
+{
+  "name": "lambda-chat",
+  "version": "1.0.0",
+  "description": "Chat Fulfillment Lambda for Connect Nova Sonic Hybrid",
+  "main": "index.mjs",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.400.0",
+    "@aws-sdk/client-lex-models-v2": "^3.400.0",
+    "@aws-sdk/client-dynamodb": "^3.400.0"
+  }
+}

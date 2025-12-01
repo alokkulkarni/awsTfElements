@@ -56,7 +56,8 @@ resource "aws_lambda_function" "mcp_server" {
 
   environment {
     variables = {
-      ENV = "prod"
+      ENV    = "prod"
+      LOCALE = var.locale
     }
   }
 }

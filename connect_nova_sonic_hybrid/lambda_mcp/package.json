@@ -1,0 +1,8 @@
+{
+  "name": "lambda-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server Lambda for Connect Nova Sonic Hybrid",
+  "main": "index.mjs",
+  "type": "module",
+  "dependencies": {}
+}

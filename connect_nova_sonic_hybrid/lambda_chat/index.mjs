@@ -59,8 +59,10 @@ export const handler = async (event) => {
       }
 
       const departments = Object.keys(queueMap).join(", ");
+      const locale = process.env.LOCALE || 'en_US';
       const prompt = `You are an intelligent intent classifier for a customer service bot. 
       The available departments are: ${departments}.
+      The user's locale is: ${locale}. Please respond appropriately for this locale.
       
       User message: "${userMessage}"
       

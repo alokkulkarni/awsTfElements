@@ -219,6 +219,7 @@ resource "aws_lambda_function" "voice_orchestrator" {
       FEEDBACK_TABLE_NAME = aws_dynamodb_table.hallucination_feedback.name
       CONTEXT_TABLE_NAME  = aws_dynamodb_table.conversation_context.name
       QUEUE_MAP           = jsonencode({ for k, v in aws_connect_queue.queues : k => v.arn })
+      LOCALE              = var.locale
     }
   }
 }
