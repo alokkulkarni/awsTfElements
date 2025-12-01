@@ -245,6 +245,51 @@ While S3 is excellent for storage, **DynamoDB** is superior for managing the *wo
 +---+----+       +----+----+       +------+-------+       +------+-----+       +------+------+
 ```
 
+## Amazon Connect Contact Flow View
+
+The Contact Flow in Amazon Connect serves as the entry point and orchestrator for the session. For the Nova Sonic solution, the flow is designed to be minimal, offloading the conversational logic to the Voice Orchestrator Lambda.
+
+### Visual Flow Representation
+
+```text
+[Entry] -> [Logging Behavior: On] -> [Set Voice: Neural]
+                   |
+                   v
+          [Check Contact Attributes] (Determine Channel/Intent)
+                   |
+        +----------+----------+
+        |                     |
+   [Text/Chat]           [Voice/Phone]
+        |                     |
+        v                     v
+   [Get Customer Input]  [Start Media Streaming] (To Kinesis Video Streams)
+   (Lex Bot Hook)             |
+                              v
+                         [Invoke AWS Lambda] (Voice Orchestrator)
+                              |
+                              v
+                         [Loop / Wait] (Lambda manages conversation)
+                              |
+                              v
+                         [Disconnect]
+```
+
+### Key Contact Flow Blocks
+
+1.  **Start Media Streaming**:
+    *   **Purpose**: Captures the raw audio stream from the caller.
+    *   **Configuration**: Streams to Kinesis Video Streams (KVS). This ARN is passed to the Lambda.
+
+2.  **Invoke AWS Lambda**:
+    *   **Target**: `voice_orchestrator` function.
+    *   **Parameters**: Passes `ContactId`, `MediaStreamArn`, and `CustomerPhoneNumber`.
+    *   **Behavior**: The Lambda connects to Nova Sonic, manages the bidirectional audio stream, and executes tools. It keeps the Lambda running for the duration of the conversation (or until a pause/handoff).
+
+3.  **Error Handling**:
+    *   If the Lambda fails or Nova Sonic is unavailable, the flow routes to a standard **Play Prompt** ("Sorry, I'm having trouble...") and disconnects or transfers to an agent.
+
+This design ensures that Amazon Connect handles the telephony (SIP/RTP) while Nova Sonic handles the intelligence and audio generation.
+
 ## Integration with MCP Servers
 
 The **Voice Orchestrator Lambda** acts as the client for Model Context Protocol (MCP) servers.
