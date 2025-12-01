@@ -1,0 +1,99 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "SetLogging",
+  "Actions": [
+    {
+      "Identifier": "SetLogging",
+      "Type": "UpdateLoggingBehavior",
+      "Parameters": { "Behavior": "Enable" },
+      "Transitions": { "NextAction": "SetVoice" }
+    },
+    {
+      "Identifier": "SetVoice",
+      "Type": "UpdateContactTextToSpeechVoice",
+      "Parameters": { "TextToSpeechVoice": "Joanna" },
+      "Transitions": { "NextAction": "StartStreaming" }
+    },
+    {
+      "Identifier": "StartStreaming",
+      "Type": "StartMediaStreaming",
+      "Parameters": {
+        "MediaStreamType": "Audio",
+        "MediaStreamTrack": "FROM_CUSTOMER"
+      },
+      "Transitions": { "NextAction": "InvokeNovaSonic" }
+    },
+    {
+      "Identifier": "InvokeNovaSonic",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "FunctionArn": "${voice_lambda_arn}"
+      },
+      "Transitions": {
+        "NextAction": "CheckQueueAttribute",
+        "Errors": [
+          { "NextAction": "PlayFallbackPrompt", "ErrorType": "NoMatchingError" }
+        ]
+      }
+    },
+    {
+      "Identifier": "CheckQueueAttribute",
+      "Type": "CheckContactAttributes",
+      "Parameters": {
+        "Attribute": "TargetQueue"
+      },
+      "Transitions": {
+        "NextAction": "Disconnect",
+        "Conditions": [
+          { "NextAction": "TransferSales", "Condition": { "Operator": "Equals", "Operands": ["Sales"] } },
+          { "NextAction": "TransferSupport", "Condition": { "Operator": "Equals", "Operands": ["Support"] } },
+          { "NextAction": "TransferBilling", "Condition": { "Operator": "Equals", "Operands": ["Billing"] } }
+        ]
+      }
+    },
+    {
+      "Identifier": "TransferSales",
+      "Type": "TransferToQueue",
+      "Parameters": { "QueueId": "${sales_queue_arn}" },
+      "Transitions": { "NextAction": "Disconnect", "Errors": [{ "NextAction": "Disconnect", "ErrorType": "NoMatchingError" }] }
+    },
+    {
+      "Identifier": "TransferSupport",
+      "Type": "TransferToQueue",
+      "Parameters": { "QueueId": "${support_queue_arn}" },
+      "Transitions": { "NextAction": "Disconnect", "Errors": [{ "NextAction": "Disconnect", "ErrorType": "NoMatchingError" }] }
+    },
+    {
+      "Identifier": "TransferBilling",
+      "Type": "TransferToQueue",
+      "Parameters": { "QueueId": "${billing_queue_arn}" },
+      "Transitions": { "NextAction": "Disconnect", "Errors": [{ "NextAction": "Disconnect", "ErrorType": "NoMatchingError" }] }
+    },
+    {
+      "Identifier": "PlayFallbackPrompt",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "I am having trouble connecting to the intelligent assistant. Switching to our automated backup system."
+      },
+      "Transitions": { "NextAction": "InvokeLexFallback" }
+    },
+    {
+      "Identifier": "InvokeLexFallback",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "LexV2BotName": "${lex_bot_name}",
+        "LexV2BotAliasArn": "${lex_bot_alias_arn}"
+      },
+      "Transitions": {
+        "NextAction": "CheckQueueAttribute",
+        "Errors": [{ "NextAction": "Disconnect", "ErrorType": "NoMatchingError" }]
+      }
+    },
+    {
+      "Identifier": "Disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

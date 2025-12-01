@@ -56,6 +56,20 @@ resource "aws_iam_role_policy" "lambda_chat_policy" {
           "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0",
           module.bedrock_guardrail.guardrail_arn
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = aws_dynamodb_table.conversation_context.arn
+      },
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunction"
+        Resource = aws_lambda_function.mcp_server.arn
       }
     ]
   })
@@ -114,7 +128,10 @@ resource "aws_iam_role_policy" "lambda_voice_policy" {
           "dynamodb:UpdateItem",
           "dynamodb:GetItem"
         ]
-        Resource = aws_dynamodb_table.hallucination_feedback.arn
+        Resource = [
+          aws_dynamodb_table.hallucination_feedback.arn,
+          aws_dynamodb_table.conversation_context.arn
+        ]
       }
     ]
   })
@@ -141,8 +158,10 @@ resource "aws_lambda_function" "chat_fulfillment" {
 
   environment {
     variables = {
-      GUARDRAIL_ID      = module.bedrock_guardrail.guardrail_id
-      GUARDRAIL_VERSION = module.bedrock_guardrail.guardrail_version
+      GUARDRAIL_ID       = module.bedrock_guardrail.guardrail_id
+      GUARDRAIL_VERSION  = module.bedrock_guardrail.guardrail_version
+      CONTEXT_TABLE_NAME = aws_dynamodb_table.conversation_context.name
+      MCP_FUNCTION_NAME  = aws_lambda_function.mcp_server.function_name
     }
   }
 }
@@ -168,6 +187,7 @@ resource "aws_lambda_function" "voice_orchestrator" {
       GUARDRAIL_VERSION   = module.bedrock_guardrail.guardrail_version
       MCP_FUNCTION_NAME   = aws_lambda_function.mcp_server.function_name
       FEEDBACK_TABLE_NAME = aws_dynamodb_table.hallucination_feedback.name
+      CONTEXT_TABLE_NAME  = aws_dynamodb_table.conversation_context.name
     }
   }
 }
@@ -299,6 +319,66 @@ resource "aws_lexv2models_intent" "fallback" {
   }
 }
 
+resource "aws_lexv2models_slot_type" "department" {
+  bot_id      = aws_lexv2models_bot.chat_bot.id
+  bot_version = "DRAFT"
+  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  name        = "DepartmentType"
+  
+  slot_type_values {
+    sample_value { value = "Sales" }
+  }
+  slot_type_values {
+    sample_value { value = "Support" }
+  }
+  slot_type_values {
+    sample_value { value = "Billing" }
+  }
+  
+  value_selection_setting {
+    resolution_strategy = "OriginalValue"
+  }
+}
+
+resource "aws_lexv2models_intent" "talk_to_agent" {
+  bot_id      = aws_lexv2models_bot.chat_bot.id
+  bot_version = "DRAFT"
+  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  name        = "TalkToAgent"
+  
+  sample_utterance { utterance = "I want to speak to an agent" }
+  sample_utterance { utterance = "Transfer me to {Department}" }
+  sample_utterance { utterance = "Can I talk to {Department}" }
+  sample_utterance { utterance = "Connect me to a human" }
+  
+  fulfillment_code_hook {
+    enabled = true
+  }
+}
+
+resource "aws_lexv2models_slot" "department" {
+  bot_id      = aws_lexv2models_bot.chat_bot.id
+  bot_version = "DRAFT"
+  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  intent_id   = aws_lexv2models_intent.talk_to_agent.intent_id
+  name        = "Department"
+  slot_type_id = aws_lexv2models_slot_type.department.slot_type_id
+  
+  value_elicitation_setting {
+    slot_constraint = "Required"
+    prompt_specification {
+      message_group {
+        message {
+          plain_text_message {
+            value = "Which department would you like to speak with? Sales, Support, or Billing?"
+          }
+        }
+      }
+      max_retries = 3
+    }
+  }
+}
+
 resource "aws_lexv2models_bot_version" "initial" {
   bot_id = aws_lexv2models_bot.chat_bot.id
   locale_specification = {
@@ -306,7 +386,10 @@ resource "aws_lexv2models_bot_version" "initial" {
       source_bot_version = "DRAFT"
     }
   }
-  depends_on = [aws_lexv2models_intent.fallback]
+  depends_on = [
+    aws_lexv2models_intent.fallback,
+    aws_lexv2models_intent.talk_to_agent
+  ]
 }
 
 resource "awscc_lex_bot_alias" "prod" {
@@ -346,4 +429,101 @@ resource "aws_lambda_permission" "lex_invoke_chat" {
   function_name = aws_lambda_function.chat_fulfillment.function_name
   principal     = "lex.amazonaws.com"
   source_arn    = awscc_lex_bot_alias.prod.arn
+}
+
+resource "aws_dynamodb_table" "conversation_context" {
+  name         = "${var.project_name}-conversation-context"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "ContactId"
+
+  attribute {
+    name = "ContactId"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "TTL"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = aws_kms_key.log_key.arn
+  }
+
+  tags = {
+    Purpose = "Context Preservation for Fallback"
+  }
+}
+
+# -------------------------------------------------------------------------
+# Connect Agent Queues & Routing
+# -------------------------------------------------------------------------
+
+# Get Default Hours of Operation
+data "aws_connect_hours_of_operation" "default" {
+  instance_id = aws_connect_instance.this.id
+  name        = "Basic Hours"
+}
+
+# Create Queues
+resource "aws_connect_queue" "sales" {
+  instance_id           = aws_connect_instance.this.id
+  name                  = "Sales"
+  description           = "Sales Department Queue"
+  hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
+  tags = {
+    Department = "Sales"
+  }
+}
+
+resource "aws_connect_queue" "support" {
+  instance_id           = aws_connect_instance.this.id
+  name                  = "Support"
+  description           = "Customer Support Queue"
+  hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
+  tags = {
+    Department = "Support"
+  }
+}
+
+resource "aws_connect_queue" "billing" {
+  instance_id           = aws_connect_instance.this.id
+  name                  = "Billing"
+  description           = "Billing & Payments Queue"
+  hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
+  tags = {
+    Department = "Billing"
+  }
+}
+
+# -------------------------------------------------------------------------
+# Connect Contact Flow (Nova Sonic IVR)
+# -------------------------------------------------------------------------
+
+resource "aws_connect_contact_flow" "nova_sonic_ivr" {
+  instance_id  = aws_connect_instance.this.id
+  name         = "Nova Sonic Intelligent IVR"
+  description  = "Main entry point using Nova Sonic with Lex Fallback"
+  type         = "CONTACT_FLOW"
+  content      = templatefile("${path.module}/contact_flows/nova_sonic_ivr.json.tftpl", {
+    voice_lambda_arn   = aws_lambda_function.voice_orchestrator.arn
+    sales_queue_arn    = aws_connect_queue.sales.arn
+    support_queue_arn  = aws_connect_queue.support.arn
+    billing_queue_arn  = aws_connect_queue.billing.arn
+    lex_bot_name       = aws_lexv2models_bot.chat_bot.name
+    lex_bot_alias_arn  = awscc_lex_bot_alias.prod.arn
+  })
+}
+
+# -------------------------------------------------------------------------
+# Lambda Permissions (Connect -> Voice Lambda)
+# -------------------------------------------------------------------------
+
+resource "aws_lambda_permission" "connect_invoke_voice" {
+  statement_id  = "AllowConnectInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.voice_orchestrator.function_name
+  principal     = "connect.amazonaws.com"
+  source_arn    = aws_connect_instance.this.arn
 }

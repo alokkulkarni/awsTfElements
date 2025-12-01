@@ -1,0 +1,36 @@
+name: Deploy Contact Flows
+
+on:
+  push:
+    paths:
+      - 'connect_nova_sonic_hybrid/contact_flows/**'
+  workflow_dispatch:
+
+jobs:
+  deploy-flows:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: connect_nova_sonic_hybrid
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.5.0
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: eu-west-2
+
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Deploy Contact Flows Only
+      run: terraform apply -auto-approve -target=aws_connect_contact_flow.nova_sonic_ivr

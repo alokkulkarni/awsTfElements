@@ -7,61 +7,66 @@ This document details how Nova Sonic handles a complex transactional request—c
 
 ## Complete System Architecture
 
-The following diagram illustrates the end-to-end hybrid architecture, highlighting the parallel paths for Text (Lex) and Voice (Nova Sonic), the unified Guardrails, and the Feedback Loop components.
+The following diagram illustrates the end-to-end hybrid architecture, highlighting the parallel paths for Text (Lex) and Voice (Nova Sonic), the unified Guardrails, the shared Context State, the Feedback Loop, and the integration with **Agent Queues** for human handoff.
 
 ```text
-+-----------------------------------------------------------------------------------------------+
-|                                   AWS Cloud Environment                                       |
-+-----------------------------------------------------------------------------------------------+
-|                                                                                               |
-|   +--------+                                +------------------+                              |
-|   |  User  |<==========================>    |  Amazon Connect  |                              |
-|   +--------+       Voice / Chat             +---------+--------+                              |
-|                                                       |                                       |
-|                                                       | Routing                               |
-|                                                       v                                       |
-|                                             +---------+--------+                              |
-|                                             |   Contact Flow   |                              |
-|                                             +----+--------+----+                              |
-|                                                  |        |                                   |
-|                      Text Chat Path              |        |      Voice Path (Nova Sonic)      |
-|               +----------------------------------+        +-----------------------------+     |
-|               |                                                                         |     |
-|               v                                                                         v     |
-|      +--------+--------+                                                       +--------+-----+------+
-|      |  Amazon Lex V2  |                                                       |    Voice Lambda     |
-|      |   (NLU/Slots)   |                                                       | (Stream Orchestrator)|
-|      +--------+--------+                                                       +--------+-----+------+
-|               |                                                                         ^     |
-|               v                                                                         |     |
-|      +--------+--------+                                                                |     |
-|      |   Chat Lambda   |                                                                |     |
-|      |  (Fulfillment)  |                                                                |     |
-|      +--------+--------+                                                                |     |
-|               |                                                                         |     |
-|               v                                                                         |     |
-|      +--------+--------+        +---------------------+                        +--------+-----+------+
-|      | Bedrock (Text)  |<------>|  Bedrock Guardrails |<---------------------->|     Nova Sonic      |
-|      | (Claude Haiku)  |        | (Safety/Moderation) |                        |    (Audio Model)    |
-|      +-----------------+        +---------------------+                        +---------------------+
-|                                                                                               |
-|                                                                                               |
-|                                                                                               |
-|      +-----------------+                                                                      |
-|      | Backend / MCP   |<---------------------------------------------------------------------+
-|      |    Servers      |          Tool Execution (GET/POST)                                   |
-|      +-----------------+                                                                      |
-|                                                                                               |
-+-----------------------------------------------------------------------------------------------+
-|                            Observability & Feedback Loop                                      |
-+-----------------------------------------------------------------------------------------------+
-|                                                                                               |
-|  +--------------+       +--------------+        +--------------+        +------------------+  |
-|  |  CloudWatch  |       |  S3 Bucket   |        |   DynamoDB   |        | Bedrock Training |  |
-|  |     Logs     |       | (Audit/Logs) |<------>|  (Workflow)  |------->|   (Fine-Tuning)  |  |
-|  +--------------+       +--------------+        +--------------+        +------------------+  |
-|                                                                                               |
-+-----------------------------------------------------------------------------------------------+
++---------------------------------------------------------------------------------------------------------------+
+|                                          AWS Cloud Environment                                                |
++---------------------------------------------------------------------------------------------------------------+
+|                                                                                                               |
+|   +--------+                                       +------------------+         +---------------------+       |
+|   |  User  |<=====================================>|  Amazon Connect  |-------->|    Agent Queues     |       |
+|   +--------+       Voice / Chat                    +---------+--------+         | (Sales, Support...) |       |
+|                                                              |                  +----------+----------+       |
+|                                                              | Routing / Fallback          |                  |
+|                                                              v                             v                  |
+|                                                    +---------+--------+             +------+------+           |
+|                                                    |   Contact Flow   |             | Human Agent |           |
+|                                                    +----+--------+----+             +-------------+           |
+|                                                         |        |                                            |
+|                             Text Chat / Fallback Path   |        |      Voice Path (Nova Sonic)               |
+|                      +----------------------------------+        +-----------------------------+              |
+|                      |                                                                         |              |
+|                      v                                                                         v              |
+|             +--------+--------+                                                       +--------+-----+------+ |
+|             |  Amazon Lex V2  |                                                       |    Voice Lambda     | |
+|             |   (NLU/Slots)   |                                                       | (Stream Orchestrator)| |
+|             +--------+--------+                                                       +--------+-----+------+ |
+|                      |                                                                         ^     |        |
+|                      v                                                                         |     |        |
+|             +--------+--------+                                                                |     |        |
+|             |   Chat Lambda   |<---------------------------------------------------------------+     |        |
+|             |  (Fulfillment)  |             (Context Handoff via DynamoDB)                     |     |        |
+|             +--------+--------+                                                                |     |        |
+|                      |    |                                                                    |     |        |
+|                      |    +--------------------------------------------------------+           |     |        |
+|                      v                                                             v           |     |        |
+|             +--------+--------+        +---------------------+                        +--------+-----+------+ |
+|             | Bedrock (Text)  |<------>|  Bedrock Guardrails |<---------------------->|     Nova Sonic      | |
+|             | (Claude Haiku)  |        | (Safety/Moderation) |                        |    (Audio Model)    | |
+|             +-----------------+        +---------------------+                        +---------------------+ |
+|                                                                                                               |
+|                                                                                                               |
+|      +-----------------------+                                                                                |
+|      |   DynamoDB (Context)  |<------------------------------------------------------------------------+      |
+|      |   (Session State)     |<----------------------------------------+                               |      |
+|      +-----------------------+                                         |                               |      |
+|                                                                        |                               |      |
+|      +-----------------------+                                         |                               |      |
+|      |   MCP Server Lambda   |<----------------------------------------+                               |      |
+|      |   (Backend Tools)     |<------------------------------------------------------------------------+      |
+|      +-----------------------+                                                                                |
+|                                                                                                               |
++---------------------------------------------------------------------------------------------------------------+
+|                                   Observability & Feedback Loop                                               |
++---------------------------------------------------------------------------------------------------------------+
+|                                                                                                               |
+|  +--------------+       +--------------+        +--------------+        +------------------+                  |
+|  |  CloudWatch  |       |  S3 Bucket   |        |   DynamoDB   |        | Bedrock Training |                  |
+|  |     Logs     |       | (Audit/Logs) |<------>|  (Feedback)  |------->|   (Fine-Tuning)  |                  |
+|  +--------------+       +--------------+        +--------------+        +------------------+                  |
+|                                                                                                               |
++---------------------------------------------------------------------------------------------------------------+
 ```
 
 ## The "Audio-to-Action" Paradigm
@@ -124,7 +129,108 @@ The following diagram illustrates the end-to-end hybrid architecture, highlighti
 *   **Nova Sonic**: Receives the tool result.
 *   **Nova Sonic (Audio Output)**: *"Done. I've updated your address to 123 Main Street, Seattle. Is there anything else?"*
 
-## Sequence Diagram
+### Fallback Scenario: Nova Sonic Failure
+
+If the Nova Sonic model becomes unavailable or returns an error during the conversation, the system automatically degrades to the standard Amazon Lex V2 path while preserving context.
+
+#### 1. Error Detection & Context Save
+*   **Voice Orchestrator**: Detects a timeout or 5xx error from the Nova Sonic stream.
+*   **Action**:
+    1.  Captures the current session state (e.g., `intent: update_address`, `slots: {street: '123 Main St'}`).
+    2.  Writes this state to the **DynamoDB Context Table** with a TTL.
+    3.  Returns a specific error signal to Amazon Connect.
+
+#### 2. Routing to Fallback
+*   **Amazon Connect**: Receives the error signal.
+*   **Contact Flow**: Transitions from the "Invoke AWS Lambda" block to the **Error** path.
+*   **Action**: Plays a message: *"I'm having trouble hearing you clearly. Let me switch you to our secure automated system."*
+*   **Handoff**: Transfers control to the **Amazon Lex V2** bot.
+
+#### 3. Context Restoration & Fulfillment
+*   **Amazon Lex**: Invokes the **Chat Fulfillment Lambda** (Code Hook).
+*   **Chat Lambda**:
+    1.  Checks the **DynamoDB Context Table** using the `ContactId`.
+    2.  Retrieves the saved state (`intent: update_address`).
+    3.  Pre-fills the Lex slots.
+*   **Result**: The user continues exactly where they left off, interacting with Lex (Text-to-Speech) instead of Nova Sonic, but with the same backend capabilities (MCP Tools) and safety checks (Guardrails).
+
+## Intelligent IVR & Agent Routing
+
+This architecture replaces traditional DTMF menus ("Press 1 for Sales") with a **Natural Language IVR** powered by Nova Sonic.
+
+### 1. Nova Sonic as the IVR
+Instead of navigating a tree, the user simply states their intent. Nova Sonic classifies this intent and uses a specific tool to signal Amazon Connect to transfer the call.
+
+*   **Tool Definition**: `transfer_to_queue`
+    ```json
+    {
+      "name": "transfer_to_queue",
+      "description": "Transfers the user to a human agent queue based on their request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "queue_name": { 
+            "type": "string", 
+            "enum": ["Sales", "Support", "Billing", "General"] 
+          },
+          "reason": { "type": "string" }
+        },
+        "required": ["queue_name"]
+      }
+    }
+    ```
+
+### 2. Routing Logic (Voice Path)
+1.  **User**: "I'd like to speak to someone about buying a new policy."
+2.  **Nova Sonic**: Identifies intent as `Sales`.
+3.  **Action**: Calls tool `transfer_to_queue(queue_name="Sales", reason="New Policy")`.
+4.  **Voice Orchestrator**:
+    *   Receives the tool call.
+    *   Sets a **Contact Attribute** in Amazon Connect (e.g., `TargetQueue = "Sales"`).
+    *   Returns a specific signal to the Contact Flow (e.g., `TransferRequired`).
+5.  **Contact Flow**:
+    *   Checks the `TargetQueue` attribute.
+    *   Executes the **Transfer to Queue** block.
+    *   The user is placed in the "Sales" queue for the next available agent.
+
+### 3. Fallback IVR (Lex + Polly)
+If Nova Sonic fails, the **Amazon Lex** bot handles the routing with similar logic:
+1.  **Lex Intent**: `TalkToAgent` (with slot `Department`).
+2.  **Chat Fulfillment Lambda**:
+    *   Validates the department.
+    *   Sets the `TargetQueue` session attribute.
+    *   Returns a `Delegate` or `Close` response to Connect.
+3.  **Contact Flow**:
+    *   Reads the session attribute from Lex.
+    *   Executes the **Transfer to Queue** block.
+
+## Sequence Diagram: IVR & Agent Handoff
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Connect as Amazon Connect
+    participant Lambda as Voice Orchestrator
+    participant Nova as Nova Sonic
+    participant Queue as Agent Queue
+
+    User->>Connect: "I need to talk to support"
+    Connect->>Lambda: Stream Audio
+    Lambda->>Nova: Stream Audio
+    
+    Note over Nova: Analyzes Intent (Support)
+    Nova-->>Lambda: ToolUse(name="transfer_to_queue", args={queue="Support"})
+    
+    Note over Lambda: Sets Contact Attribute: TargetQueue="Support"
+    Lambda-->>Connect: Signal: TransferRequired
+    
+    Note over Connect: Exits Lambda Loop
+    Connect->>Connect: Check Attribute [TargetQueue]
+    Connect->>Queue: Transfer to "Support" Queue
+    Queue-->>User: "Please hold for the next agent..."
+```
+
+## Sequence Diagram (Transactional)
 
 ```mermaid
 sequenceDiagram
@@ -239,56 +345,94 @@ While S3 is excellent for storage, **DynamoDB** is superior for managing the *wo
     |                 |                   |                      |                    |
     |                 |                   |                      | [Gen Confirmation] |
     |                 |                   |   "Address Updated"  |                    |
-    |   "Updated."    |   Stream Audio    |<---------------------+                    |
-    |<----------------+<------------------+                      |                    |
+    |                 |                   +--------------------->|                    |
+    |                 |                   |                      |                    |
+    |                 |                   |                      | [Send Audio Stream]|
+    |                 |                   |   "Done. I've updated your address..."     |
+    |                 |                   +--------------------->|                    |
+    |                 |                   |                      |                    |
+    |                 |                   |                      | [Disconnect]      |
+    |                 |                   |                      |                    |
     |                 |                   |                      |                    |
 +---+----+       +----+----+       +------+-------+       +------+-----+       +------+------+
 ```
 
 ## Amazon Connect Contact Flow View
 
-The Contact Flow in Amazon Connect serves as the entry point and orchestrator for the session. For the Nova Sonic solution, the flow is designed to be minimal, offloading the conversational logic to the Voice Orchestrator Lambda.
+The Contact Flow in Amazon Connect acts as the **State Machine** for the interaction. It handles the telephony lifecycle, media streaming, and routing decisions based on signals returned from the Voice Orchestrator (Nova Sonic) or the Fallback Bot (Lex).
 
-### Visual Flow Representation
+### Detailed Visual Flow
 
 ```text
-[Entry] -> [Logging Behavior: On] -> [Set Voice: Neural]
-                   |
-                   v
-          [Check Contact Attributes] (Determine Channel/Intent)
-                   |
-        +----------+----------+
-        |                     |
-   [Text/Chat]           [Voice/Phone]
-        |                     |
-        v                     v
-   [Get Customer Input]  [Start Media Streaming] (To Kinesis Video Streams)
-   (Lex Bot Hook)             |
-                              v
-                         [Invoke AWS Lambda] (Voice Orchestrator)
-                              |
-                              v
-                         [Loop / Wait] (Lambda manages conversation)
-                              |
-                              v
-                         [Disconnect]
+                                     [Entry Point]
+                                           |
+                                           v
+                                [Set Logging Behavior: On]
+                                           |
+                                           v
+                                [Set Voice: Neural (Polly)]
+                                           |
+                                           v
+                                [Start Media Streaming]
+                     (Streams Audio to Kinesis Video Streams)
+                                           |
+                                           v
+      +------------------------> [Invoke AWS Lambda] <---------------------------+
+      |                       (Voice Orchestrator / Nova Sonic)                  |
+      |                                    |                                     |
+      |                                    | (Returns Status)                    |
+      |                                    v                                     |
+      |                       +------------+-------------+                       |
+      |                       |            |             |                       |
+      |                  (Success)     (Transfer)     (Error)                    |
+      |                       |            |             |                       |
+      |                       |            |             v                       |
+      +--(Loop/Continue)------+            |      [Play Prompt]                  |
+                                           |    "Switching to keypad mode..."    |
+                                           |             |                       |
+                                           |             v                       |
+                                           |    [Get Customer Input] <-----------+
+                                           |    (Amazon Lex V2 Bot)              |
+                                           |      (Fallback IVR)                 |
+                                           |             |                       |
+                                           |             | (Intent: Agent)       |
+                                           |             v                       |
+                                           v      [Set Queue (Lex)]              |
+                                  [Check Contact Attributes]                     |
+                                  (Key: "TargetQueue")                           |
+                                           |                                     |
+                       +-------------------+-------------------+                 |
+                       |                   |                   |                 |
+                   [Sales]             [Support]           [Billing]             |
+                       |                   |                   |                 |
+                       v                   v                   v                 |
+               [Transfer to Queue] [Transfer to Queue] [Transfer to Queue]       |
+                    (Sales)             (Support)           (Billing)            |
 ```
 
-### Key Contact Flow Blocks
+### Key Flow Logic & Signals
 
-1.  **Start Media Streaming**:
-    *   **Purpose**: Captures the raw audio stream from the caller.
-    *   **Configuration**: Streams to Kinesis Video Streams (KVS). This ARN is passed to the Lambda.
+1.  **The "Nova Sonic Loop"**:
+    *   The **Invoke AWS Lambda** block calls the `Voice Orchestrator`.
+    *   This Lambda runs for the duration of the conversation loop.
+    *   It only returns to the Contact Flow when a **State Change** is needed (Transfer, Hangup, or Error).
 
-2.  **Invoke AWS Lambda**:
-    *   **Target**: `voice_orchestrator` function.
-    *   **Parameters**: Passes `ContactId`, `MediaStreamArn`, and `CustomerPhoneNumber`.
-    *   **Behavior**: The Lambda connects to Nova Sonic, manages the bidirectional audio stream, and executes tools. It keeps the Lambda running for the duration of the conversation (or until a pause/handoff).
+2.  **Intelligent Routing (IVR)**:
+    *   **Scenario**: User says "I need to speak to sales."
+    *   **Nova Sonic**: Detects intent, calls `transfer_to_queue(queue="Sales")`.
+    *   **Lambda**: Sets contact attribute `TargetQueue = "Sales"` and returns `{ "status": "Transfer" }`.
+    *   **Contact Flow**: Exits the Lambda block via the "Transfer" path (mapped via `ContactFlowModule`), checks the `TargetQueue` attribute, and routes the call.
 
-3.  **Error Handling**:
-    *   If the Lambda fails or Nova Sonic is unavailable, the flow routes to a standard **Play Prompt** ("Sorry, I'm having trouble...") and disconnects or transfers to an agent.
+3.  **Resilient Fallback (Lex + Polly)**:
+    *   **Scenario**: Nova Sonic API fails or times out.
+    *   **Lambda**: Returns `{ "status": "Error" }`.
+    *   **Contact Flow**: Moves to the **Get Customer Input** block (Lex V2).
+    *   **Lex**: Takes over the conversation using standard NLU and Polly TTS.
+    *   **Parity**: Lex can *also* set the `TargetQueue` attribute, allowing the user to reach an agent even if the generative AI is down.
 
-This design ensures that Amazon Connect handles the telephony (SIP/RTP) while Nova Sonic handles the intelligence and audio generation.
+4.  **Agent Queues**:
+    *   Standard Amazon Connect queues are used.
+    *   This allows the solution to integrate with existing WFM (Workforce Management) and reporting tools without modification.
 
 ## Integration with MCP Servers
 
@@ -319,31 +463,54 @@ The **Voice Orchestrator Lambda** acts as the client for Model Context Protocol 
     
     The Lambda function parses the `toolUse` event name and routes it to the appropriate MCP server endpoint or internal API function.
 
-## Implementation Details
+## Resilient Architecture: Auto-Fallback & Recovery
 
-### Infrastructure Components
-The architecture is deployed via Terraform with the following key resources:
+To ensure high availability, the system implements a **Resilient Fallback Pattern** that seamlessly transitions between the **Nova Sonic (Voice)** path and the **Lex+Polly (Text/Standard Voice)** path.
 
-1.  **Voice Orchestrator Lambda** (`aws_lambda_function.voice_orchestrator`):
-    *   **Role**: Manages the bidirectional stream with Nova Sonic and executes tools.
-    *   **Environment Variables**:
-        *   `MCP_FUNCTION_NAME`: The function name of the MCP Server Lambda (e.g., `connect-nova-sonic-hybrid-mcp-server`).
-        *   `FEEDBACK_TABLE_NAME`: The DynamoDB table for tracking hallucinations (e.g., `connect-nova-sonic-hybrid-hallucination-feedback`).
-        *   `GUARDRAIL_ID` / `GUARDRAIL_VERSION`: Bedrock Guardrail configuration.
+### Fallback Logic (Nova Sonic -> Lex)
+1.  **Failure Detection**: The `Voice Orchestrator` Lambda monitors the health of the Nova Sonic stream.
+2.  **Context Preservation**: Upon detecting a failure (e.g., `ThrottlingException`, `ServiceUnavailable`), the Lambda:
+    *   Captures the current **Conversation Context** (intent, slots, last user utterance).
+    *   Writes this context to the `ConversationContext` DynamoDB table (keyed by `ContactId`).
+    *   Returns a specific `Error` signal to Amazon Connect.
+3.  **Routing**: Amazon Connect catches the error and routes the contact to the **Lex Bot** flow.
+4.  **Context Restoration**: The Lex Bot's fulfillment Lambda (`Chat Fulfillment`) reads the `ConversationContext` from DynamoDB to "warm start" the Lex session, knowing exactly where the user left off.
 
-2.  **MCP Server Lambda** (`aws_lambda_function.mcp_server`):
-    *   **Role**: Simulates the backend system, handling tool execution requests.
-    *   **Runtime**: Node.js 18.x.
-    *   **Security**: Only invocable by the Voice Orchestrator Lambda via IAM permissions.
+### Recovery Logic (Lex -> Nova Sonic)
+1.  **Availability Check**: During the Lex interaction, the `Chat Fulfillment` Lambda periodically checks the availability of Nova Sonic (via lightweight API probes or Circuit Breaker state).
+2.  **Signal Recovery**: If Nova Sonic becomes available:
+    *   The Lambda sets a session attribute `NovaSonicAvailable: true`.
+    *   It saves the current Lex state (slots/intent) back to the `ConversationContext` table.
+    *   It signals Amazon Connect (via a specific intent or attribute) to loop back to the **Voice Path**.
+3.  **Seamless Handoff**: The contact re-enters the `Voice Orchestrator`, which reads the updated context and resumes the session using Nova Sonic's superior voice capabilities.
 
-3.  **Feedback Loop DynamoDB** (`aws_dynamodb_table.hallucination_feedback`):
-    *   **Role**: Stores hallucination events and feedback data.
-    *   **Key Schema**: `SessionId` (Partition Key), `Timestamp` (Sort Key).
-    *   **Encryption**: Server-side encrypted with AWS KMS.
+```text
+       [Connect]
+           |
+           v
+    (Try Nova Sonic) ----(Success)----> [Voice Orchestrator] <---> [Nova Sonic]
+           |                                     |
+        (Error)                               (Failure)
+           |                                     |
+           v                                     v
+    [Fallback Flow] <---(Save Context)--- [Context DB]
+           |
+           v
+      [Lex Bot] <----(Restore Context)
+           |
+           v
+    (Check Availability) --(Available?)--> [Signal Recovery]
+                                                 |
+                                                 v
+                                          (Loop to Start)
+```
 
-### Security & Zero Trust
-*   **Least Privilege**: The Voice Orchestrator IAM role (`lambda_voice_role`) is strictly scoped.
-    *   `bedrock:InvokeModelWithResponseStream`: Allowed only for `amazon.nova-sonic-v1:0`.
-    *   `lambda:InvokeFunction`: Allowed **only** for the specific MCP Server Lambda ARN.
-    *   `dynamodb:PutItem`: Allowed **only** for the specific Feedback Loop table ARN.
-*   **Encryption**: All data at rest (S3 Logs, DynamoDB Tables) is encrypted using a customer-managed KMS key (`aws_kms_key.log_key`).
+### Feature Parity in Fallback (Zero Trust)
+
+Even when operating in **Fallback Mode (Lex)**, the system maintains full feature parity and security:
+
+1.  **Content Moderation**: The `Chat Fulfillment` Lambda continues to enforce **Bedrock Guardrails** on all text inputs and outputs, ensuring safety policies are applied regardless of the channel.
+2.  **Tool Use (MCP)**: The `Chat Fulfillment` Lambda is granted explicit, least-privilege permission to invoke the **MCP Server Lambda**. This allows the text bot to perform the same backend actions (e.g., `update_address`) as the voice bot.
+3.  **Zero Trust Security**:
+    *   **Identity Propagation**: The user's identity and context are securely passed via DynamoDB.
+    *   **Scoped Permissions**: The Chat Lambda can *only* invoke the specific MCP function and *only* access the specific Context table. It cannot access other resources or functions.
