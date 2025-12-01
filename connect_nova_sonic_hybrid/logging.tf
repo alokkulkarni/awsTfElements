@@ -103,6 +103,27 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "audit_logs" {
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "audit_logs" {
+  bucket = aws_s3_bucket.audit_logs.id
+
+  rule {
+    id     = "cost-optimization-lifecycle"
+    status = "Enabled"
+
+    filter {}
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "audit_logs" {
   bucket = aws_s3_bucket.audit_logs.id
 

@@ -1,6 +1,19 @@
 data "aws_caller_identity" "current" {}
 
 # -------------------------------------------------------------------------
+# Environment Logic
+# -------------------------------------------------------------------------
+locals {
+  is_prod = var.environment == "prod"
+
+  # Contact Lens is expensive, enable only in prod
+  contact_lens_enabled = local.is_prod ? true : false
+
+  # Log retention: 1 year for prod, 7 days for dev/test
+  log_retention_days = local.is_prod ? 365 : 7
+}
+
+# -------------------------------------------------------------------------
 # Shared Resources (Bedrock Guardrail)
 # -------------------------------------------------------------------------
 module "bedrock_guardrail" {
@@ -65,6 +78,16 @@ resource "aws_iam_role_policy" "lambda_chat_policy" {
           "dynamodb:UpdateItem"
         ]
         Resource = aws_dynamodb_table.conversation_context.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lex:UpdateIntent",
+          "lex:BuildBotLocale",
+          "lex:DescribeIntent",
+          "lex:DescribeBotLocale"
+        ]
+        Resource = "arn:aws:lex:${var.aws_region}:${data.aws_caller_identity.current.account_id}:bot/${aws_lexv2models_bot.chat_bot.id}/*"
       },
       {
         Effect = "Allow"
@@ -163,6 +186,10 @@ resource "aws_lambda_function" "chat_fulfillment" {
       CONTEXT_TABLE_NAME = aws_dynamodb_table.conversation_context.name
       MCP_FUNCTION_NAME  = aws_lambda_function.mcp_server.function_name
       QUEUE_MAP          = jsonencode({ for k, v in aws_connect_queue.queues : k => v.arn })
+      BOT_ID             = aws_lexv2models_bot.chat_bot.id
+      BOT_VERSION        = "DRAFT"
+      LOCALE_ID          = var.locale
+      INTENT_ID          = aws_lexv2models_intent.talk_to_agent.intent_id
     }
   }
 }
@@ -195,6 +222,22 @@ resource "aws_lambda_function" "voice_orchestrator" {
 }
 
 # -------------------------------------------------------------------------
+# CloudWatch Log Groups (Cost Optimization)
+# -------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "chat_fulfillment" {
+  name              = "/aws/lambda/${aws_lambda_function.chat_fulfillment.function_name}"
+  retention_in_days = local.log_retention_days
+  tags              = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "voice_orchestrator" {
+  name              = "/aws/lambda/${aws_lambda_function.voice_orchestrator.function_name}"
+  retention_in_days = local.log_retention_days
+  tags              = var.tags
+}
+
+# -------------------------------------------------------------------------
 # Amazon Connect
 # -------------------------------------------------------------------------
 
@@ -203,7 +246,7 @@ resource "aws_connect_instance" "this" {
   inbound_calls_enabled    = true
   outbound_calls_enabled   = true
   instance_alias           = "${var.project_name}-instance"
-  contact_lens_enabled     = true # Enable Contact Lens for Analytics
+  contact_lens_enabled     = local.contact_lens_enabled
 }
 
 # Connect Storage Config - Chat Transcripts
@@ -301,17 +344,17 @@ resource "aws_iam_role" "lex_role" {
 }
 
 # Lex Bot Locale & Intent
-resource "aws_lexv2models_bot_locale" "en_us" {
+resource "aws_lexv2models_bot_locale" "main" {
   bot_id          = aws_lexv2models_bot.chat_bot.id
   bot_version     = "DRAFT"
-  locale_id       = "en_US"
+  locale_id       = var.locale
   n_lu_intent_confidence_threshold = 0.40
 }
 
 resource "aws_lexv2models_intent" "fallback" {
   bot_id      = aws_lexv2models_bot.chat_bot.id
   bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  locale_id   = aws_lexv2models_bot_locale.main.locale_id
   name        = "FallbackIntent"
   
   parent_intent_signature = "AMAZON.FallbackIntent"
@@ -324,7 +367,7 @@ resource "aws_lexv2models_intent" "fallback" {
 resource "aws_lexv2models_slot_type" "department" {
   bot_id      = aws_lexv2models_bot.chat_bot.id
   bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  locale_id   = aws_lexv2models_bot_locale.main.locale_id
   name        = "DepartmentType"
   
   dynamic "slot_type_values" {
@@ -342,7 +385,7 @@ resource "aws_lexv2models_slot_type" "department" {
 resource "aws_lexv2models_intent" "talk_to_agent" {
   bot_id      = aws_lexv2models_bot.chat_bot.id
   bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  locale_id   = aws_lexv2models_bot_locale.main.locale_id
   name        = "TalkToAgent"
   
   sample_utterance { utterance = "I want to speak to an agent" }
@@ -358,7 +401,7 @@ resource "aws_lexv2models_intent" "talk_to_agent" {
 resource "aws_lexv2models_slot" "department" {
   bot_id      = aws_lexv2models_bot.chat_bot.id
   bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  locale_id   = aws_lexv2models_bot_locale.main.locale_id
   intent_id   = aws_lexv2models_intent.talk_to_agent.intent_id
   name        = "Department"
   slot_type_id = aws_lexv2models_slot_type.department.slot_type_id
@@ -381,7 +424,7 @@ resource "aws_lexv2models_slot" "department" {
 resource "aws_lexv2models_bot_version" "initial" {
   bot_id = aws_lexv2models_bot.chat_bot.id
   locale_specification = {
-    (aws_lexv2models_bot_locale.en_us.locale_id) = {
+    (aws_lexv2models_bot_locale.main.locale_id) = {
       source_bot_version = "DRAFT"
     }
   }
@@ -398,7 +441,7 @@ resource "awscc_lex_bot_alias" "prod" {
   
   bot_alias_locale_settings = [
     {
-      locale_id = "en_US"
+      locale_id = var.locale
       bot_alias_locale_setting = {
         enabled = true
         code_hook_specification = {

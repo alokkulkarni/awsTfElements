@@ -1,0 +1,121 @@
+name: Rebuild Lex Bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment (dev, prod, etc.)'
+        required: true
+        default: 'dev'
+      project_name:
+        description: 'Project Name'
+        required: true
+        default: 'connect-nova-sonic-hybrid'
+      locale:
+        description: 'Lex Bot Locale ID (e.g., en_US, en_GB)'
+        required: true
+        default: 'en_US'
+  schedule:
+    - cron: '0 2 * * *' # Runs at 2:00 AM UTC every day
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+
+jobs:
+  rebuild-bot:
+    name: Rebuild Lex Bot
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set Environment Variables
+        run: |
+          echo "PROJECT_NAME=${{ github.event.inputs.project_name || 'connect-nova-sonic-hybrid' }}" >> $GITHUB_ENV
+          echo "LOCALE_ID=${{ github.event.inputs.locale || 'en_US' }}" >> $GITHUB_ENV
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find Bot ID
+        id: find-bot
+        run: |
+          BOT_NAME="${{ env.PROJECT_NAME }}-chat-bot"
+          echo "Looking for bot with name: $BOT_NAME"
+          
+          # List bots and filter by name
+          BOT_ID=$(aws lexv2-models list-bots \
+            --region ${{ env.AWS_REGION }} \
+            --filters name=BotName,operator=EQ,values="$BOT_NAME" \
+            --query "botSummaries[0].botId" \
+            --output text)
+          
+          if [ "$BOT_ID" == "None" ] || [ -z "$BOT_ID" ]; then
+            echo "Error: Bot with name '$BOT_NAME' not found."
+            exit 1
+          fi
+          
+          echo "Found Bot ID: $BOT_ID"
+          echo "BOT_ID=$BOT_ID" >> $GITHUB_ENV
+
+      - name: Trigger Bot Build
+        run: |
+          echo "Triggering build for Bot ID: ${{ env.BOT_ID }} (Locale: ${{ env.LOCALE_ID }}, Version: DRAFT)"
+          
+          aws lexv2-models build-bot-locale \
+            --bot-id ${{ env.BOT_ID }} \
+            --bot-version DRAFT \
+            --locale-id ${{ env.LOCALE_ID }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for Build Completion
+        run: |
+          echo "Waiting for build to complete..."
+          
+          # Timeout counter (e.g., 10 minutes = 60 * 10s intervals)
+          MAX_RETRIES=60
+          COUNT=0
+          
+          while [ $COUNT -lt $MAX_RETRIES ]; do
+            STATUS=$(aws lexv2-models describe-bot-locale \
+              --bot-id ${{ env.BOT_ID }} \
+              --bot-version DRAFT \
+              --locale-id ${{ env.LOCALE_ID }} \
+              --region ${{ env.AWS_REGION }} \
+              --query "botLocaleStatus" \
+              --output text)
+            
+            echo "Current Status: $STATUS"
+            
+            if [ "$STATUS" == "Built" ]; then
+              echo "✅ Bot build completed successfully!"
+              exit 0
+            elif [ "$STATUS" == "Failed" ]; then
+              echo "❌ Bot build failed."
+              
+              # Get failure reasons
+              aws lexv2-models describe-bot-locale \
+                --bot-id ${{ env.BOT_ID }} \
+                --bot-version DRAFT \
+                --locale-id ${{ env.LOCALE_ID }} \
+                --region ${{ env.AWS_REGION }} \
+                --query "failureReasons"
+                
+              exit 1
+            fi
+            
+            echo "Build in progress... waiting 10s"
+            sleep 10
+            COUNT=$((COUNT+1))
+          done
+          
+          echo "❌ Timeout waiting for bot build."
+          exit 1

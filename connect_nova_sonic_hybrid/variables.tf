@@ -45,3 +45,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "locale" {
+  description = "Locale for Lex Bot and other components (e.g., en_US, en_GB)"
+  type        = string
+  default     = "en_US"
+}
