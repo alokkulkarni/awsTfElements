@@ -17,6 +17,25 @@ The solution splits interactions into two optimized paths:
     *   **Purpose**: Handles voice calls with ultra-low latency and expressive audio.
     *   **Logic**: Uses a bidirectional stream to process audio chunks in real-time.
     *   **Safety**: Bedrock Guardrails applied to the stream events in real-time.
+    *   **Human Handover**: Intelligent detection of "Talk to Agent" requests with transparent handover to Amazon Connect queues.
+
+## Key Features
+
+### 1. Polyglot Lambda Support
+The architecture now supports multiple runtimes for all Lambda functions, giving you the flexibility to choose your preferred language:
+*   **Node.js (Default)**: High-performance, asynchronous event handling.
+*   **Python**: Uses **FastMCP** for the MCP server and Boto3 for AWS SDK interactions.
+*   **Go**: Ultra-low latency, statically typed implementation for high-throughput voice processing.
+
+### 2. Localization & Region Awareness
+The system is designed for global deployment with built-in localization support:
+*   **Infrastructure**: A `LOCALE` Terraform variable injects the target locale (e.g., `en_US`, `en_GB`, `fr_FR`) into all Lambda functions.
+*   **Validation**: The MCP Server adapts its validation logic (e.g., Zip Code formats) based on the active locale.
+*   **Currency**: Financial tools automatically return the correct currency symbol (USD, GBP, EUR).
+*   **AI Context**: Both Chat (Claude) and Voice (Nova Sonic) models receive the locale in their system prompts to ensure culturally appropriate responses.
+
+### 3. FastMCP Integration
+The Python MCP Server implementation utilizes the **FastMCP** library, providing a robust, decorator-based approach to defining tools and resources. This simplifies the creation of new tools and ensures strict type validation using Pydantic models.
 
 ## Observability & Compliance (Audit Trails)
 

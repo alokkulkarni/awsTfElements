@@ -13,7 +13,8 @@ def handler(event, context):
     
     queue_map_str = os.environ.get('QUEUE_MAP', '{}')
     queue_map = json.loads(queue_map_str)
-    print("Available Queues:", list(queue_map.keys()))
+    departments = ", ".join(queue_map.keys())
+    print("Available Queues:", departments)
     
     audio_chunk = event.get('audioChunk')
     
@@ -22,7 +23,11 @@ def handler(event, context):
         body = json.dumps({
             "audio": audio_chunk,
             "stream": True,
-            "locale": locale
+            "locale": locale,
+            "systemPrompt": f"""You are a helpful voice assistant. 
+            If the user asks to speak to a human agent or a specific department, output the tag [HANDOVER: DepartmentName].
+            Available departments: {departments}.
+            If the department is not found, output [HANDOVER: Default]."""
         })
         
         response = bedrock.invoke_model_with_response_stream(
@@ -49,6 +54,23 @@ def handler(event, context):
                             'statusCode': 400,
                             'body': "Content blocked"
                         }
+                    
+                    # Check for Handover Signal
+                    if "[HANDOVER:" in decoded:
+                        import re
+                        match = re.search(r'\[HANDOVER: (.*?)\]', decoded)
+                        if match:
+                            department = match.group(1)
+                            target_arn = queue_map.get(department) or queue_map.get('Default') or list(queue_map.values())[0]
+                            print(f"Handover requested to {department} ({target_arn})")
+                            
+                            return {
+                                'statusCode': 200,
+                                'action': "transfer",
+                                'targetQueue': department,
+                                'targetQueueArn': target_arn,
+                                'message': f"Transferring you to {department}..."
+                            }
         
         return {
             'statusCode': 200,

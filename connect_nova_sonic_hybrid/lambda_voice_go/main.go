@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -18,14 +20,19 @@ type VoiceEvent struct {
 }
 
 type Response struct {
-	StatusCode int    `json:"statusCode"`
-	Body       string `json:"body"`
+	StatusCode     int    `json:"statusCode"`
+	Body           string `json:"body,omitempty"`
+	Action         string `json:"action,omitempty"`
+	TargetQueue    string `json:"targetQueue,omitempty"`
+	TargetQueueArn string `json:"targetQueueArn,omitempty"`
+	Message        string `json:"message,omitempty"`
 }
 
 var (
 	bedrockClient *bedrockruntime.Client
 	guardrailID   string
 	guardrailVer  string
+	queueMap      map[string]string
 )
 
 func init() {
@@ -37,6 +44,12 @@ func init() {
 	bedrockClient = bedrockruntime.NewFromConfig(cfg)
 	guardrailID = os.Getenv("GUARDRAIL_ID")
 	guardrailVer = os.Getenv("GUARDRAIL_VERSION")
+
+	queueMapStr := os.Getenv("QUEUE_MAP")
+	if queueMapStr == "" {
+		queueMapStr = "{}"
+	}
+	json.Unmarshal([]byte(queueMapStr), &queueMap)
 }
 
 func HandleRequest(ctx context.Context, event VoiceEvent) (Response, error) {
@@ -47,10 +60,21 @@ func HandleRequest(ctx context.Context, event VoiceEvent) (Response, error) {
 		locale = "en_US"
 	}
 
+	departments := make([]string, 0, len(queueMap))
+	for k := range queueMap {
+		departments = append(departments, k)
+	}
+
+	systemPrompt := fmt.Sprintf(`You are a helpful voice assistant. 
+	If the user asks to speak to a human agent or a specific department, output the tag [HANDOVER: DepartmentName].
+	Available departments: %s.
+	If the department is not found, output [HANDOVER: Default].`, strings.Join(departments, ", "))
+
 	payload := map[string]interface{}{
-		"audio":  event.AudioChunk,
-		"stream": true,
-		"locale": locale,
+		"audio":        event.AudioChunk,
+		"stream":       true,
+		"locale":       locale,
+		"systemPrompt": systemPrompt,
 	}
 
 	payloadBytes, _ := json.Marshal(payload)
@@ -83,6 +107,36 @@ func HandleRequest(ctx context.Context, event VoiceEvent) (Response, error) {
 			if containsGuardrailIntervention(decoded) {
 				log.Println("Content blocked by Guardrail")
 				return Response{StatusCode: 400, Body: "Content blocked"}, nil
+			}
+
+			// Check for Handover Signal
+			if strings.Contains(decoded, "[HANDOVER:") {
+				start := strings.Index(decoded, "[HANDOVER: ") + len("[HANDOVER: ")
+				end := strings.Index(decoded[start:], "]")
+				if end != -1 {
+					department := decoded[start : start+end]
+					targetArn, ok := queueMap[department]
+					if !ok {
+						// Fallback to Default or first available
+						if def, ok := queueMap["Default"]; ok {
+							targetArn = def
+						} else {
+							for _, v := range queueMap {
+								targetArn = v
+								break
+							}
+						}
+					}
+
+					log.Printf("Handover requested to %s (%s)", department, targetArn)
+					return Response{
+						StatusCode:     200,
+						Action:         "transfer",
+						TargetQueue:    department,
+						TargetQueueArn: targetArn,
+						Message:        fmt.Sprintf("Transferring you to %s...", department),
+					}, nil
+				}
 			}
 		}
 	}

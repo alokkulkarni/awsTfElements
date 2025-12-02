@@ -34,7 +34,28 @@ connect_queues = {
 *   The Chatbot will update its prompt to ask users about these specific departments.
 *   The Lambda functions will automatically receive the ARNs for these queues to handle routing.
 
-## 2. Creating and Exporting Contact Flows
+## 2. Configuration: Localization and Runtimes
+
+### 2.1 Setting the Locale
+The architecture supports dynamic localization for validation, currency, and AI responses. You can configure this in your `terraform.tfvars` file:
+
+```hcl
+# Available options: en_US, en_GB, fr_FR, de_DE
+locale = "en_GB"
+```
+
+**Effects of changing the locale:**
+*   **MCP Server**:
+    *   `update_address`: Validates postcodes according to the region (e.g., 5 digits for US, alphanumeric for UK).
+    *   `get_account_balance`: Returns the appropriate currency (USD, GBP, EUR).
+*   **Voice & Chat**: The AI models (Claude 3 Haiku and Nova Sonic) are prompted to respond in the appropriate language and cultural context.
+
+### 2.2 Choosing a Runtime
+The project includes Lambda implementations in **Node.js**, **Python**, and **Go**.
+*   By default, the Terraform configuration points to the **Node.js** handlers.
+*   To switch runtimes, modify the `source_dir` and `handler` in `main.tf` (or the specific module definition) to point to the desired language folder (e.g., `lambda_chat_python`, `lambda_voice_go`).
+
+## 3. Creating and Exporting Contact Flows
 
 You are expected to design your Contact Flows using the Amazon Connect Visual Editor, as it is much easier than writing JSON manually.
 

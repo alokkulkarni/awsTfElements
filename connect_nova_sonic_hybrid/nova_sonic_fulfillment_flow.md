@@ -75,6 +75,18 @@ The following diagram illustrates the end-to-end hybrid architecture, highlighti
 2.  **Dynamic Slot Elicitation**: If information is missing, the model naturally generates a follow-up question based on the tool definition, without needing a hardcoded dialogue flow.
 3.  **Tool Execution**: When the model has sufficient information, it pauses audio generation and emits a structured **Tool Use Event**. The Orchestrator Lambda executes this tool and returns the result.
 
+## Human Handover Protocol
+
+To ensure a seamless customer experience, the Voice Orchestrator implements a "Human in the Loop" protocol.
+
+1.  **Detection**: The Nova Sonic model is instructed via a System Prompt to detect when a user explicitly requests a human agent or when the conversation exceeds its capabilities.
+2.  **Signaling**: Instead of generating audio, the model outputs a special control tag: `[HANDOVER: DepartmentName]`.
+3.  **Orchestration**:
+    *   The Voice Lambda parses the stream for this tag.
+    *   It resolves the `DepartmentName` to a specific Amazon Connect Queue ARN using the `QUEUE_MAP` environment variable.
+    *   It returns a structured `transfer` action to the Amazon Connect instance.
+4.  **Execution**: Amazon Connect terminates the Lambda loop and transfers the contact to the specified queue.
+
 ## Process Flow Example: "I want to change my address"
 
 ### Scenario

@@ -11,13 +11,14 @@ export const handler = async (event) => {
   
   // Available Queues for Routing Logic
   const queueMap = JSON.parse(process.env.QUEUE_MAP || '{}');
-  console.log("Available Queues:", Object.keys(queueMap));
+  const departments = Object.keys(queueMap).join(", ");
+  console.log("Available Queues:", departments);
 
   // Simulated Audio Input (Base64) from Connect
   const audioChunk = event.audioChunk; 
+  const locale = process.env.LOCALE || 'en_US';
 
   try {
-    const locale = process.env.LOCALE || 'en_US';
     const input = {
       modelId: "amazon.nova-sonic-v1:0", // Hypothetical Model ID for Nova Sonic
       contentType: "application/json",
@@ -25,7 +26,11 @@ export const handler = async (event) => {
       body: JSON.stringify({
         audio: audioChunk,
         stream: true, // Enable bidirectional streaming
-        locale: locale
+        locale: locale,
+        systemPrompt: `You are a helpful voice assistant. 
+        If the user asks to speak to a human agent or a specific department, output the tag [HANDOVER: DepartmentName].
+        Available departments: ${departments}.
+        If the department is not found, output [HANDOVER: Default].`
       }),
       guardrailIdentifier: process.env.GUARDRAIL_ID,
       guardrailVersion: process.env.GUARDRAIL_VERSION,
@@ -43,7 +48,6 @@ export const handler = async (event) => {
         console.log("Received Stream Chunk:", decoded);
         
         // Check for Guardrail Intervention in the stream
-        // Nova Sonic would emit specific events if content is blocked
         if (decoded.includes("guardrail_intervention")) {
             console.warn("Content blocked by Guardrail");
             return {
@@ -51,6 +55,24 @@ export const handler = async (event) => {
                 body: "Content blocked"
             };
         }
+
+        // Check for Handover Signal
+        const handoverMatch = decoded.match(/\[HANDOVER: (.*?)\]/);
+        if (handoverMatch) {
+            const department = handoverMatch[1];
+            const targetArn = queueMap[department] || queueMap['Default'] || Object.values(queueMap)[0];
+            console.log(`Handover requested to ${department} (${targetArn})`);
+            
+            return {
+                statusCode: 200,
+                action: "transfer",
+                targetQueue: department,
+                targetQueueArn: targetArn,
+                message: `Transferring you to ${department}...`
+            };
+        }
+      }
+    }
       }
     }
 
