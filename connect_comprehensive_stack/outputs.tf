@@ -27,3 +27,8 @@ output "dynamodb_table_name" {
   description = "The name of the DynamoDB table for new intents"
   value       = module.intent_table.name
 }
+
+output "ccp_url" {
+  description = "The URL of the custom CCP"
+  value       = "https://${aws_cloudfront_distribution.ccp_site.domain_name}"
+}

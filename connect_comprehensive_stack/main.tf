@@ -39,18 +39,21 @@ module "kms_key" {
 # S3 Bucket for Connect Storage (Recordings, Transcripts)
 # ---------------------------------------------------------------------------------------------------------------------
 module "connect_storage_bucket" {
-  source      = "../resources/s3"
-  bucket_name = "${var.project_name}-storage-${data.aws_caller_identity.current.account_id}"
-  tags        = var.tags
+  source           = "../resources/s3"
+  bucket_name      = "${var.project_name}-storage-${data.aws_caller_identity.current.account_id}"
+  enable_lifecycle = true
+  tags             = var.tags
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Amazon Connect Instance
 # ---------------------------------------------------------------------------------------------------------------------
 module "connect_instance" {
-  source         = "../resources/connect"
-  instance_alias = var.connect_instance_alias
-  tags           = var.tags
+  source                    = "../resources/connect"
+  instance_alias            = var.connect_instance_alias
+  contact_flow_logs_enabled = true
+  contact_lens_enabled      = true
+  tags                      = var.tags
 }
 
 # Connect Storage Configuration
@@ -88,12 +91,46 @@ resource "aws_connect_instance_storage_config" "call_recordings" {
   }
 }
 
+resource "aws_connect_instance_storage_config" "real_time_analysis" {
+  instance_id   = module.connect_instance.id
+  resource_type = "REAL_TIME_CONTACT_ANALYSIS_SEGMENTS"
+
+  storage_config {
+    s3_config {
+      bucket_name = module.connect_storage_bucket.id
+      bucket_prefix = "real-time-analysis"
+      encryption_config {
+        encryption_type = "KMS"
+        key_id          = module.kms_key.key_id
+      }
+    }
+    storage_type = "S3"
+  }
+}
+
+resource "aws_connect_instance_storage_config" "contact_trace_records" {
+  instance_id   = module.connect_instance.id
+  resource_type = "CONTACT_TRACE_RECORDS"
+
+  storage_config {
+    s3_config {
+      bucket_name = module.connect_storage_bucket.id
+      bucket_prefix = "contact-trace-records"
+      encryption_config {
+        encryption_type = "KMS"
+        key_id          = module.kms_key.key_id
+      }
+    }
+    storage_type = "S3"
+  }
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # DynamoDB for New Intent Logging
 # ---------------------------------------------------------------------------------------------------------------------
 module "intent_table" {
   source     = "../resources/dynamodb"
-  table_name = "${var.project_name}-new-intents"
+  name       = "${var.project_name}-new-intents"
   hash_key   = "utterance"
   range_key  = "timestamp"
   tags       = var.tags
@@ -116,7 +153,7 @@ module "bedrock_guardrail" {
 # ---------------------------------------------------------------------------------------------------------------------
 data "archive_file" "lex_fallback_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/lambda/lex_fallback"
+  source_dir  = "${path.module}/${var.lex_fallback_lambda.source_dir}"
   output_path = "${path.module}/lambda/lex_fallback.zip"
 }
 
@@ -165,20 +202,26 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "dynamodb:PutItem"
         ]
         Effect   = "Allow"
-        Resource = module.intent_table.table_arn
+        Resource = module.intent_table.arn
       }
     ]
   })
+}
+
+resource "aws_cloudwatch_log_group" "lex_fallback" {
+  name              = "/aws/lambda/${var.project_name}-lex-fallback"
+  retention_in_days = 30
+  tags              = var.tags
 }
 
 resource "aws_lambda_function" "lex_fallback" {
   filename         = data.archive_file.lex_fallback_zip.output_path
   function_name    = "${var.project_name}-lex-fallback"
   role             = aws_iam_role.lambda_role.arn
-  handler          = "lambda_function.lambda_handler"
+  handler          = var.lex_fallback_lambda.handler
   source_code_hash = data.archive_file.lex_fallback_zip.output_base64sha256
-  runtime          = "python3.11"
-  timeout          = 30
+  runtime          = var.lex_fallback_lambda.runtime
+  timeout          = var.lex_fallback_lambda.timeout
 
   environment {
     variables = {
@@ -186,7 +229,13 @@ resource "aws_lambda_function" "lex_fallback" {
     }
   }
 
+  tracing_config {
+    mode = "Active"
+  }
+
   tags = var.tags
+  
+  depends_on = [aws_cloudwatch_log_group.lex_fallback]
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -197,41 +246,35 @@ module "lex_bot" {
   source                 = "../resources/lex"
   bot_name               = "${var.project_name}-bot"
   fulfillment_lambda_arn = aws_lambda_function.lex_fallback.arn
+  locale                 = var.locale
+  voice_id               = var.voice_id
   tags                   = var.tags
 }
 
 # We need to define the Bot Locale, Intents, and Slots explicitly as the module is minimal
-resource "aws_lexv2models_bot_locale" "en_us" {
-  bot_id          = module.lex_bot.bot_id
-  bot_version     = "DRAFT"
-  locale_id       = "en_US"
-  nlu_confidence_threshold = 0.40
-}
+# Note: The module creates the locale "en_US" and a FallbackIntent.
 
-resource "aws_lexv2models_intent" "fallback_intent" {
+resource "aws_lexv2models_intent" "intents" {
+  for_each = var.lex_intents
+
   bot_id      = module.lex_bot.bot_id
   bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
-  name        = "FallbackIntent"
-  parent_intent_signature = "AMAZON.FallbackIntent"
-
-  fulfillment_code_hook {
-    enabled = true
-  }
-}
-
-resource "aws_lexv2models_intent" "transfer_agent" {
-  bot_id      = module.lex_bot.bot_id
-  bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
-  name        = "TransferToAgent"
-  description = "Transfer to a human agent"
+  locale_id   = module.lex_bot.locale_id
+  name        = each.key
+  description = each.value.description
   
-  sample_utterances {
-    utterance = "I want to speak to a human"
+  dynamic "sample_utterance" {
+    for_each = each.value.utterances
+    content {
+      utterance = sample_utterance.value
+    }
   }
-  sample_utterances {
-    utterance = "Agent please"
+
+  dynamic "fulfillment_code_hook" {
+    for_each = each.value.fulfillment_enabled ? [1] : []
+    content {
+      enabled = true
+    }
   }
 }
 
@@ -247,11 +290,13 @@ resource "aws_lambda_permission" "lex_invoke" {
 # ---------------------------------------------------------------------------------------------------------------------
 # Connect Queue & Routing Profile
 # ---------------------------------------------------------------------------------------------------------------------
-resource "aws_connect_queue" "agent_queue" {
+resource "aws_connect_queue" "queues" {
+  for_each = var.queues
+
   instance_id = module.connect_instance.id
-  name        = "GeneralAgentQueue"
-  description = "Queue for general agents"
-  hours_of_operation_id = module.connect_instance.hours_of_operation_id # Using default from module output if available, else need to fetch
+  name        = each.key
+  description = each.value.description
+  hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
   tags        = var.tags
 }
 
@@ -270,67 +315,20 @@ data "aws_connect_hours_of_operation" "default" {
 resource "aws_connect_contact_flow" "main_flow" {
   instance_id  = module.connect_instance.id
   name         = "MainIVRFlow"
-  description  = "Main flow with Lex integration"
+  description  = "Main flow with Lex integration and Agent Routing"
   type         = "CONTACT_FLOW"
-  content      = jsonencode({
-    # Simplified JSON representation of a flow
-    # In reality, this is a complex JSON structure. 
-    # I will use a minimal valid structure or a placeholder.
-    Version = "2019-10-30"
-    StartAction = "GetUserInput"
-    Actions = [
-      {
-        Identifier = "GetUserInput"
-        Type = "GetUserInput"
-        Parameters = {
-          Text = "How can I help you today?"
-          BotName = module.lex_bot.bot_name
-          BotAlias = "TestBotAlias" # Need to create alias
-        }
-        Transitions = {
-          NextAction = "CheckIntent"
-          Errors = [],
-          Conditions = []
-        }
-      },
-      {
-        Identifier = "CheckIntent"
-        Type = "CheckAttribute"
-        # ... logic to check intent and route to queue ...
-        Transitions = {
-            NextAction = "TransferToQueue"
-        }
-      },
-      {
-        Identifier = "TransferToQueue"
-        Type = "TransferToQueue"
-        Parameters = {
-            QueueId = aws_connect_queue.agent_queue.arn
-        }
-      }
-    ]
+  content      = templatefile("${path.module}/${var.contact_flow_template_path}", {
+    lex_bot_name         = module.lex_bot.bot_name
+    general_queue_arn    = aws_connect_queue.queues["GeneralAgentQueue"].arn
+    account_queue_arn    = aws_connect_queue.queues["AccountQueue"].arn
+    lending_queue_arn    = aws_connect_queue.queues["LendingQueue"].arn
+    onboarding_queue_arn = aws_connect_queue.queues["OnboardingQueue"].arn
+    locale               = replace(var.locale, "_", "-")
   })
   tags = var.tags
 }
 
-# We need a Bot Alias for Connect to use
-resource "aws_lexv2models_bot_alias" "test_alias" {
-  bot_id      = module.lex_bot.bot_id
-  bot_alias_name = "TestBotAlias"
-  bot_version = "DRAFT"
-  bot_alias_locale_settings {
-    locale_id = aws_lexv2models_bot_locale.en_us.locale_id
-    bot_alias_locale_setting {
-      enabled = true
-      code_hook_specification {
-        lambda_code_hook {
-          code_hook_interface_version = "1.0"
-          lambda_arn = aws_lambda_function.lex_fallback.arn
-        }
-      }
-    }
-  }
-}
+
 
 # Associate Lex Bot with Connect Instance
 resource "aws_connect_bot_association" "this" {
@@ -339,5 +337,64 @@ resource "aws_connect_bot_association" "this" {
     lex_region = var.region
     name       = module.lex_bot.bot_name
   }
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# CloudTrail for Auditing
+# ---------------------------------------------------------------------------------------------------------------------
+module "cloudtrail_bucket" {
+  source            = "../resources/s3"
+  bucket_name       = "${var.project_name}-cloudtrail-${data.aws_caller_identity.current.account_id}"
+  enable_lifecycle  = true
+  attach_policy     = true
+  policy            = data.aws_iam_policy_document.cloudtrail_bucket_policy.json
+  tags              = var.tags
+}
+
+data "aws_iam_policy_document" "cloudtrail_bucket_policy" {
+  statement {
+    sid    = "AWSCloudTrailAclCheck"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+
+    actions   = ["s3:GetBucketAcl"]
+    resources = ["arn:aws:s3:::${var.project_name}-cloudtrail-${data.aws_caller_identity.current.account_id}"]
+  }
+
+  statement {
+    sid    = "AWSCloudTrailWrite"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+
+    actions   = ["s3:PutObject"]
+    resources = ["arn:aws:s3:::${var.project_name}-cloudtrail-${data.aws_caller_identity.current.account_id}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+  }
+}
+
+resource "aws_cloudtrail" "main" {
+  name                          = "${var.project_name}-trail"
+  s3_bucket_name                = module.cloudtrail_bucket.id
+  include_global_service_events = true
+  is_multi_region_trail         = true
+  enable_logging                = true
+  enable_log_file_validation    = true
+
+  tags = var.tags
+  
+  depends_on = [module.cloudtrail_bucket]
 }
 

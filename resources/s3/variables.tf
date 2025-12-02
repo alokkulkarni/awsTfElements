@@ -46,3 +46,13 @@ variable "enable_logging" {
   type    = bool
   default = false
 }
+
+variable "attach_policy" {
+  type    = bool
+  default = false
+}
+
+variable "policy" {
+  type    = string
+  default = null
+}

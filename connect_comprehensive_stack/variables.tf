@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS Region"
   type        = string
-  default     = "us-east-1"
+  default     = "eu-west-2"
 }
 
 variable "project_name" {
@@ -22,6 +22,18 @@ variable "connect_instance_alias" {
   default     = "my-connect-instance-demo-123" # Needs to be globally unique
 }
 
+variable "locale" {
+  description = "Locale for the bot (e.g., en_US, en_GB)"
+  type        = string
+  default     = "en_GB"
+}
+
+variable "voice_id" {
+  description = "Voice ID for the bot (e.g., Danielle, Amy)"
+  type        = string
+  default     = "Amy"
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
@@ -29,4 +41,70 @@ variable "tags" {
     Project = "ConnectComprehensive"
     ManagedBy = "Terraform"
   }
+}
+
+variable "queues" {
+  description = "Map of queues to create"
+  type = map(object({
+    description = string
+  }))
+  default = {
+    "GeneralAgentQueue" = { description = "Queue for general agents" }
+    "AccountQueue"      = { description = "Queue for account services" }
+    "LendingQueue"      = { description = "Queue for lending services" }
+    "OnboardingQueue"   = { description = "Queue for onboarding services" }
+  }
+}
+
+variable "lex_intents" {
+  description = "Map of Lex intents to create"
+  type = map(object({
+    description = string
+    utterances  = list(string)
+    fulfillment_enabled = bool
+  }))
+  default = {
+    "TransferToAgent" = {
+      description = "Transfer to a human agent"
+      utterances  = ["I want to speak to a human", "Agent please"]
+      fulfillment_enabled = false
+    }
+    "CheckBalance" = {
+      description = "Check account balance"
+      utterances  = ["check balance", "what is my balance", "how much money do I have"]
+      fulfillment_enabled = true
+    }
+    "LoanInquiry" = {
+      description = "Inquire about loans"
+      utterances  = ["apply for loan", "loan status", "business loan options"]
+      fulfillment_enabled = true
+    }
+    "OnboardingStatus" = {
+      description = "Check onboarding application status"
+      utterances  = ["application status", "onboarding help", "status of my application"]
+      fulfillment_enabled = true
+    }
+  }
+}
+
+variable "lex_fallback_lambda" {
+  description = "Configuration for the Lex Fallback Lambda"
+  type = object({
+    source_dir  = string
+    handler     = string
+    runtime     = string
+    timeout     = number
+  })
+  default = {
+    source_dir  = "lambda/lex_fallback"
+    handler     = "lambda_function.lambda_handler"
+    runtime     = "python3.11"
+    timeout     = 30
+  }
+}
+
+variable "contact_flow_template_path" {
+  description = "Path to the Contact Flow template file"
+  type        = string
+  default     = "contact_flows/main_flow.json.tftpl"
 }

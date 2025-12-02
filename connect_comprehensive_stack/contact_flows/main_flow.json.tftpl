@@ -1,0 +1,155 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "SetRecording",
+  "Actions": [
+    {
+      "Identifier": "SetRecording",
+      "Type": "SetRecordingAndAnalyticsBehavior",
+      "Parameters": {
+        "RecordingMode": {
+          "Audio": "On",
+          "Video": "Off"
+        },
+        "RecordingParticipant": "Both",
+        "AnalyticsMode": {
+          "ContactLens": "On"
+        },
+        "AnalyticsConfiguration": {
+          "ContactLens": {
+            "RealTime": "On",
+            "PostCall": "On",
+            "Language": "${locale}",
+            "Redaction": "Off"
+          }
+        }
+      },
+      "Transitions": {
+        "NextAction": "GetUserInput",
+        "Errors": [{ "NextAction": "Disconnect" }]
+      }
+    },
+    {
+      "Identifier": "GetUserInput",
+      "Type": "GetUserInput",
+      "Parameters": {
+        "Text": "Welcome to Business Banking. How can I help you today?",
+        "BotName": "${lex_bot_name}",
+        "BotAlias": "prod"
+      },
+      "Transitions": {
+        "NextAction": "CheckIntent",
+        "Errors": [{ "NextAction": "Disconnect" }]
+      }
+    },
+    {
+      "Identifier": "CheckIntent",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "Lex.IntentName",
+        "CheckType": "Equals",
+        "Value": "TransferToAgent"
+      },
+      "Transitions": {
+        "True": "SetQueueGeneral",
+        "False": "CheckBalanceIntent" 
+      }
+    },
+    {
+      "Identifier": "CheckBalanceIntent",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "Lex.IntentName",
+        "CheckType": "Equals",
+        "Value": "CheckBalance"
+      },
+      "Transitions": {
+        "True": "SetQueueAccount",
+        "False": "CheckLoanIntent"
+      }
+    },
+    {
+      "Identifier": "CheckLoanIntent",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "Lex.IntentName",
+        "CheckType": "Equals",
+        "Value": "LoanInquiry"
+      },
+      "Transitions": {
+        "True": "SetQueueLending",
+        "False": "CheckOnboardingIntent"
+      }
+    },
+    {
+      "Identifier": "CheckOnboardingIntent",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "Lex.IntentName",
+        "CheckType": "Equals",
+        "Value": "OnboardingStatus"
+      },
+      "Transitions": {
+        "True": "SetQueueOnboarding",
+        "False": "GetUserInput"
+      }
+    },
+    {
+      "Identifier": "SetQueueGeneral",
+      "Type": "SetQueue",
+      "Parameters": {
+        "QueueId": "${general_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "TransferToQueue",
+        "Errors": [{ "NextAction": "Disconnect" }]
+      }
+    },
+    {
+      "Identifier": "SetQueueAccount",
+      "Type": "SetQueue",
+      "Parameters": {
+        "QueueId": "${account_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "TransferToQueue",
+        "Errors": [{ "NextAction": "Disconnect" }]
+      }
+    },
+    {
+      "Identifier": "SetQueueLending",
+      "Type": "SetQueue",
+      "Parameters": {
+        "QueueId": "${lending_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "TransferToQueue",
+        "Errors": [{ "NextAction": "Disconnect" }]
+      }
+    },
+    {
+      "Identifier": "SetQueueOnboarding",
+      "Type": "SetQueue",
+      "Parameters": {
+        "QueueId": "${onboarding_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "TransferToQueue",
+        "Errors": [{ "NextAction": "Disconnect" }]
+      }
+    },
+    {
+      "Identifier": "TransferToQueue",
+      "Type": "TransferToQueue",
+      "Parameters": {},
+      "Transitions": {
+        "Errors": [{ "NextAction": "Disconnect" }],
+        "AtCapacity": [{ "NextAction": "Disconnect" }]
+      }
+    },
+    {
+      "Identifier": "Disconnect",
+      "Type": "Disconnect",
+      "Parameters": {}
+    }
+  ]
+}

@@ -52,11 +52,11 @@ resource "aws_lexv2models_bot" "this" {
 resource "aws_lexv2models_bot_locale" "this" {
   bot_id          = aws_lexv2models_bot.this.id
   bot_version     = "DRAFT"
-  locale_id       = "en_US"
+  locale_id       = var.locale
   n_lu_intent_confidence_threshold = 0.40
   
   voice_settings {
-    voice_id = "Danielle"
+    voice_id = var.voice_id
     engine   = "neural"
   }
 }
@@ -98,30 +98,26 @@ resource "aws_lexv2models_intent" "chat" {
 resource "aws_lexv2models_bot_version" "this" {
   bot_id = aws_lexv2models_bot.this.id
   locale_specification = {
-    (aws_lexv2models_bot_locale.this.locale_id) = {
+    (var.locale) = {
       source_bot_version = "DRAFT"
     }
   }
-  depends_on = [
-    aws_lexv2models_intent.fallback,
-    aws_lexv2models_intent.chat
-  ]
 }
 
 resource "awscc_lex_bot_alias" "this" {
+  bot_id      = aws_lexv2models_bot.this.id
   bot_alias_name = "prod"
-  bot_id         = aws_lexv2models_bot.this.id
-  bot_version    = aws_lexv2models_bot_version.this.bot_version
-
+  bot_version = aws_lexv2models_bot_version.this.bot_version
+  
   bot_alias_locale_settings = [
     {
-      locale_id = aws_lexv2models_bot_locale.this.locale_id
+      locale_id = var.locale
       bot_alias_locale_setting = {
         enabled = true
         code_hook_specification = {
           lambda_code_hook = {
+            lambda_arn = var.fulfillment_lambda_arn
             code_hook_interface_version = "1.0"
-            lambda_arn                  = var.fulfillment_lambda_arn
           }
         }
       }

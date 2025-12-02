@@ -21,6 +21,14 @@ def lambda_handler(event, context):
     if not input_transcript:
         return close_dialog("Failed", "I didn't catch that. Could you please repeat?")
 
+    # Handle Fulfillment
+    if intent.get('name') == 'CheckBalance':
+        return handle_check_balance(event, intent.get('name'))
+    elif intent.get('name') == 'LoanInquiry':
+        return handle_loan_inquiry(event, intent.get('name'))
+    elif intent.get('name') == 'OnboardingStatus':
+        return handle_onboarding_status(event, intent.get('name'))
+
     # Call Bedrock to classify
     try:
         classification = classify_with_bedrock(input_transcript)
@@ -36,7 +44,7 @@ def lambda_handler(event, context):
         if predicted_intent == "NewIntent":
             # Log new intent candidate
             log_new_intent(input_transcript)
-            return close_dialog("Fulfilled", "I'm not sure how to help with that yet, but I've noted it down. Let me connect you to someone who can help.")
+            return close_dialog("Fulfilled", "I'm not sure how to help with that yet, but I've noted it down. Let me connect you to someone who can help.", "FallbackIntent")
 
         # If mapped to existing intent
         return delegate_to_intent(predicted_intent)
@@ -44,6 +52,20 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.error("Error calling Bedrock: %s", str(e))
         return delegate_to_intent("TransferToAgent")
+
+def handle_check_balance(event, intent_name):
+    # Mock logic for checking balance
+    # In reality, this would query a backend API
+    balance = "$15,450.00"
+    return close_dialog("Fulfilled", f"Your current business account balance is {balance}.", intent_name)
+
+def handle_loan_inquiry(event, intent_name):
+    # Mock logic for loan inquiry
+    return close_dialog("Fulfilled", "We have several loan options available for SMEs. I can have a specialist contact you, or you can apply online.", intent_name)
+
+def handle_onboarding_status(event, intent_name):
+    # Mock logic for onboarding status
+    return close_dialog("Fulfilled", "Your application is currently under review. We expect an update within 24 hours.", intent_name)
 
 def classify_with_bedrock(text):
     # Placeholder for Bedrock invocation
@@ -69,25 +91,47 @@ def classify_with_bedrock(text):
     return {"intent": "TransferToAgent", "confidence": 0.9}
 
 def log_new_intent(text):
+    import time
     if TABLE_NAME:
         dynamodb.put_item(
             TableName=TABLE_NAME,
             Item={
                 'utterance': {'S': text},
-                'timestamp': {'S': str(context.aws_request_id)} # simplified
+                'timestamp': {'S': str(int(time.time()))}
             }
         )
 
-def close_dialog(fulfillment_state, message):
+def close_dialog(fulfillment_state, message, intent_name):
     return {
         "sessionState": {
             "dialogAction": {
                 "type": "Close"
             },
             "intent": {
-                "name": "FallbackIntent",
+                "name": intent_name,
                 "state": fulfillment_state
             }
+        },
+        "messages": [
+            {
+                "contentType": "PlainText",
+                "content": message
+            }
+        ]
+    }
+
+def delegate_to_intent(intent_name):
+    return {
+        "sessionState": {
+            "dialogAction": {
+                "type": "Delegate"
+            },
+            "intent": {
+                "name": intent_name,
+                "state": "ReadyForFulfillment"
+            }
+        }
+    }
         },
         "messages": [
             {

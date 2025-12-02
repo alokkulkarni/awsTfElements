@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom CCP - Connect Comprehensive</title>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; background-color: #f0f2f5; }
+        #container { display: flex; height: 100vh; }
+        #ccp-container { width: 320px; height: 100%; border-right: 1px solid #ccc; background: #fff; }
+        #content { flex: 1; padding: 20px; overflow-y: auto; }
+        h1 { color: #232f3e; }
+        .status-box { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px; }
+        .attribute-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .attribute-table th, .attribute-table td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+        .attribute-table th { background-color: #f8f9fa; }
+        .sentiment-positive { color: green; font-weight: bold; }
+        .sentiment-negative { color: red; font-weight: bold; }
+        .sentiment-neutral { color: gray; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="ccp-container"></div>
+        <div id="content">
+            <h1>Agent Workspace</h1>
+            
+            <div class="status-box">
+                <h3>Connection Status</h3>
+                <p id="status">Initializing...</p>
+            </div>
+
+            <div class="status-box">
+                <h3>Real-time Insights</h3>
+                <p><strong>Sentiment:</strong> <span id="sentiment-score">Waiting for data...</span></p>
+                <p><strong>Intent:</strong> <span id="lex-intent">--</span></p>
+                <p><em>Note: For full real-time transcript, please use the "Contact Lens" tab in the softphone panel on the left.</em></p>
+            </div>
+
+            <div class="status-box">
+                <h3>Context & Attributes</h3>
+                <table class="attribute-table">
+                    <thead>
+                        <tr>
+                            <th>Attribute Key</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody id="attributes-body">
+                        <tr><td colspan="2">No active contact</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://global.aws-apps.com/connect-streams-min.js"></script>
+    <script>
+        const instanceAlias = "${instance_alias}"; 
+        const region = "${region}";
+        const ccpUrl = `https://$${instanceAlias}.my.connect.aws/connect/ccp-v2/`;
+
+        connect.core.initCCP(document.getElementById("ccp-container"), {
+            ccpUrl: ccpUrl,
+            loginPopup: true,
+            loginPopupAutoClose: true,
+            loginOptions: {
+                autoClose: true,
+                height: 600,
+                width: 400,
+                top: 0,
+                left: 0
+            },
+            region: region,
+            softphone: {
+                allowFramedSoftphone: true,
+                disableRingtone: false
+            },
+            pageOptions: {
+                enableAudioDeviceSettings: true,
+                enablePhoneTypeSettings: true
+            }
+        });
+
+        function updateAttributes(contact) {
+            const attributes = contact.getAttributes();
+            const tbody = document.getElementById("attributes-body");
+            tbody.innerHTML = "";
+
+            // Check for Lex Intent
+            if (attributes["lex.intent"]) {
+                document.getElementById("lex-intent").innerText = attributes["lex.intent"].value;
+            } else if (attributes["Lex.IntentName"]) {
+                 document.getElementById("lex-intent").innerText = attributes["Lex.IntentName"].value;
+            }
+
+            // Check for Sentiment (if passed as custom attribute from flow)
+            if (attributes["sentiment"]) {
+                const sentiment = attributes["sentiment"].value;
+                const el = document.getElementById("sentiment-score");
+                el.innerText = sentiment;
+                el.className = "";
+                if (sentiment.toLowerCase().includes("positive")) el.classList.add("sentiment-positive");
+                else if (sentiment.toLowerCase().includes("negative")) el.classList.add("sentiment-negative");
+                else el.classList.add("sentiment-neutral");
+            }
+
+            for (const key in attributes) {
+                const row = document.createElement("tr");
+                const keyCell = document.createElement("td");
+                const valCell = document.createElement("td");
+                keyCell.innerText = key;
+                valCell.innerText = attributes[key].value;
+                row.appendChild(keyCell);
+                row.appendChild(valCell);
+                tbody.appendChild(row);
+            }
+        }
+
+        connect.contact(function(contact) {
+            document.getElementById("status").innerText = "Contact Incoming/Connected";
+            updateAttributes(contact);
+            
+            contact.onRefresh(function(contact) {
+                updateAttributes(contact);
+            });
+
+            contact.onEnded(function() {
+                document.getElementById("status").innerText = "Contact Ended";
+                document.getElementById("attributes-body").innerHTML = "<tr><td colspan='2'>No active contact</td></tr>";
+                document.getElementById("sentiment-score").innerText = "Waiting for data...";
+                document.getElementById("lex-intent").innerText = "--";
+            });
+        });
+
+        connect.agent(function(agent) {
+            document.getElementById("status").innerText = "Agent Authenticated: " + agent.getName();
+        });
+    </script>
+</body>
+</html>

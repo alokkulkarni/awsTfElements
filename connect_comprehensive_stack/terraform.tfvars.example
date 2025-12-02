@@ -1,0 +1,61 @@
+# AWS Region
+region = "eu-west-2"
+
+# Project Name
+project_name = "connect-comprehensive"
+
+# Environment
+environment = "dev"
+
+# Connect Instance Alias (Must be globally unique)
+connect_instance_alias = "my-connect-instance-demo-123"
+
+# Tags
+tags = {
+  Project   = "ConnectComprehensive"
+  ManagedBy = "Terraform"
+  Owner     = "DevOpsTeam"
+}
+
+# Queues to create in Amazon Connect
+queues = {
+  "GeneralAgentQueue" = { description = "Queue for general agents" }
+  "AccountQueue"      = { description = "Queue for account services" }
+  "LendingQueue"      = { description = "Queue for lending services" }
+  "OnboardingQueue"   = { description = "Queue for onboarding services" }
+}
+
+# Lex Intents to create
+lex_intents = {
+  "TransferToAgent" = {
+    description = "Transfer to a human agent"
+    utterances  = ["I want to speak to a human", "Agent please", "Human support"]
+    fulfillment_enabled = false
+  }
+  "CheckBalance" = {
+    description = "Check account balance"
+    utterances  = ["check balance", "what is my balance", "how much money do I have", "account balance"]
+    fulfillment_enabled = true
+  }
+  "LoanInquiry" = {
+    description = "Inquire about loans"
+    utterances  = ["apply for loan", "loan status", "business loan options", "I need a loan"]
+    fulfillment_enabled = true
+  }
+  "OnboardingStatus" = {
+    description = "Check onboarding application status"
+    utterances  = ["application status", "onboarding help", "status of my application", "is my account ready"]
+    fulfillment_enabled = true
+  }
+}
+
+# Lambda Configuration for Lex Fallback
+lex_fallback_lambda = {
+  source_dir  = "lambda/lex_fallback"
+  handler     = "lambda_function.lambda_handler"
+  runtime     = "python3.11"
+  timeout     = 30
+}
+
+# Path to the Contact Flow Template
+contact_flow_template_path = "contact_flows/main_flow.json.tftpl"

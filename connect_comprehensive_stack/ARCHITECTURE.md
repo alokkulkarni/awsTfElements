@@ -1,6 +1,6 @@
 # Connect Comprehensive Stack Architecture
 
-This stack deploys a resilient, secure, and observable Amazon Connect contact center solution with advanced AI capabilities.
+This stack deploys a resilient, secure, and observable Amazon Connect contact center solution with advanced AI capabilities and a custom, secure Agent Workspace.
 
 ## Architecture Diagram
 
@@ -30,10 +30,14 @@ graph TD
         Connect -->|Recordings/Transcripts| S3[S3 Bucket]
         Connect -->|Logs| CloudWatch[CloudWatch Logs]
         S3 -->|Encryption| KMS[KMS Key]
+        CloudTrail[CloudTrail] -->|Audit Logs| S3Audit[S3 Audit Bucket]
     end
     
-    subgraph "Agents"
-        Agent((Human Agent)) -->|CCP| Connect
+    subgraph "Custom Agent Workspace (CCP)"
+        Agent((Human Agent)) -->|HTTPS| CloudFront[CloudFront CDN]
+        CloudFront -->|WAF Protection| WAF[AWS WAF]
+        CloudFront -->|OAC| S3Site[S3 Static Site]
+        S3Site -->|Embeds| Connect
     end
 
     Queue --> Agent
@@ -89,9 +93,9 @@ graph TD
                                        |             |                                                         |
                                        |             v                                                         |
       +--------+                       |   +---------+---------+       +-----------------------------------+   |
-      |        |                       |   |                   |       |                                   |   |
+      |        |   HTTPS (WAF)         |   |                   |       |                                   |   |
       | Agent  +<--------------------------+   Human Agent     |       |    S3 (Recordings/Transcripts)    |   |
-      |        |          CCP          |   |                   |       |          (KMS Encrypted)          |   |
+      |        |   Custom CCP          |   |                   |       |          (KMS Encrypted)          |   |
       +--------+                       |   +-------------------+       +-----------------------------------+   |
                                        |                                                                       |
                                        +-----------------------------------------------------------------------+
