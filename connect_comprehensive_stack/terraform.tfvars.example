@@ -25,6 +25,10 @@ queues = {
   "OnboardingQueue"   = { description = "Queue for onboarding services" }
 }
 
+# Feature Flags
+enable_voice_id       = false
+enable_pin_validation = true
+
 # Lex Intents to create
 lex_intents = {
   "TransferToAgent" = {

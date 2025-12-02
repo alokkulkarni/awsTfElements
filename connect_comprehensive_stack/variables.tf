@@ -97,10 +97,34 @@ variable "lex_fallback_lambda" {
   })
   default = {
     source_dir  = "lambda/lex_fallback"
-    handler     = "lambda_function.lambda_handler"
+    handler     = "lex_handler.lambda_handler"
     runtime     = "python3.11"
     timeout     = 30
   }
+}
+
+variable "enable_voice_id" {
+  description = "Enable Voice ID biometric validation in the Lambda fulfillment"
+  type        = bool
+  default     = false
+}
+
+variable "enable_pin_validation" {
+  description = "Enable PIN-based validation in the Lambda fulfillment"
+  type        = bool
+  default     = false
+}
+
+variable "enable_companion_auth" {
+  description = "Enable Companion App Authentication"
+  type        = bool
+  default     = true
+}
+
+variable "mock_data" {
+  description = "JSON string containing mock customer data for the Lambda"
+  type        = string
+  default     = "{\" +15550100\": {\"name\": \"John Doe\", \"pin\": \"1234\", \"balance\": \"$15,450.00\"}, \"+447700900000\": {\"name\": \"Jane Smith\", \"pin\": \"5678\", \"balance\": \"£2,300.00\"}}"
 }
 
 variable "contact_flow_template_path" {

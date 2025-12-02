@@ -12,6 +12,18 @@ variable "range_key" {
   default     = null
 }
 
+variable "ttl_enabled" {
+  description = "Indicates whether ttl is enabled"
+  type        = bool
+  default     = false
+}
+
+variable "ttl_attribute_name" {
+  description = "The name of the table attribute to store the TTL timestamp in"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

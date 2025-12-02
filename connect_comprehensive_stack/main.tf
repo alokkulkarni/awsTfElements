@@ -199,10 +199,21 @@ resource "aws_iam_role_policy" "lambda_policy" {
       },
       {
         Action = [
-          "dynamodb:PutItem"
+          "dynamodb:PutItem",
+          "dynamodb:GetItem"
         ]
         Effect   = "Allow"
-        Resource = module.intent_table.arn
+        Resource = [
+          module.intent_table.arn,
+          module.auth_state_table.arn
+        ]
+      },
+      {
+        Action = [
+          "sns:Publish"
+        ]
+        Effect   = "Allow"
+        Resource = module.auth_sns_topic.topic_arn
       }
     ]
   })
@@ -214,23 +225,23 @@ resource "aws_cloudwatch_log_group" "lex_fallback" {
   tags              = var.tags
 }
 
-resource "aws_lambda_function" "lex_fallback" {
-  filename         = data.archive_file.lex_fallback_zip.output_path
-  function_name    = "${var.project_name}-lex-fallback"
-  role             = aws_iam_role.lambda_role.arn
-  handler          = var.lex_fallback_lambda.handler
-  source_code_hash = data.archive_file.lex_fallback_zip.output_base64sha256
-  runtime          = var.lex_fallback_lambda.runtime
-  timeout          = var.lex_fallback_lambda.timeout
-
-  environment {
-    variables = {
-      INTENT_TABLE_NAME = module.intent_table.name
-    }
-  }
-
-  tracing_config {
-    mode = "Active"
+module "lex_fallback_lambda" {
+  source        = "../resources/lambda"
+  filename      = data.archive_file.lex_fallback_zip.output_path
+  function_name = "${var.project_name}-lex-fallback"
+  role_arn      = aws_iam_role.lambda_role.arn
+  handler       = var.lex_fallback_lambda.handler
+  runtime       = var.lex_fallback_lambda.runtime
+  
+  environment_variables = {
+    INTENT_TABLE_NAME     = module.intent_table.name
+    AUTH_STATE_TABLE_NAME = module.auth_state_table.name
+    SNS_TOPIC_ARN         = module.auth_sns_topic.topic_arn
+    CRM_API_ENDPOINT      = "${module.auth_api_gateway.api_endpoint}/customer"
+    CRM_API_KEY           = "secret-api-key-123"
+    ENABLE_VOICE_ID       = tostring(var.enable_voice_id)
+    ENABLE_PIN_VALIDATION = tostring(var.enable_pin_validation)
+    ENABLE_COMPANION_AUTH = tostring(var.enable_companion_auth)
   }
 
   tags = var.tags
@@ -245,7 +256,7 @@ resource "aws_lambda_function" "lex_fallback" {
 module "lex_bot" {
   source                 = "../resources/lex"
   bot_name               = "${var.project_name}-bot"
-  fulfillment_lambda_arn = aws_lambda_function.lex_fallback.arn
+  fulfillment_lambda_arn = module.lex_fallback_lambda.arn
   locale                 = var.locale
   voice_id               = var.voice_id
   tags                   = var.tags
@@ -282,7 +293,7 @@ resource "aws_lexv2models_intent" "intents" {
 resource "aws_lambda_permission" "lex_invoke" {
   statement_id  = "AllowLexInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.lex_fallback.function_name
+  function_name = module.lex_fallback_lambda.function_name
   principal     = "lex.amazonaws.com"
   source_arn    = module.lex_bot.bot_arn
 }
@@ -302,6 +313,232 @@ resource "aws_connect_queue" "queues" {
 
 # Note: The connect module might not output hours_of_operation_id. 
 # If not, we need a data source to find the default one.
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Auth State Table (DynamoDB)
+# ---------------------------------------------------------------------------------------------------------------------
+module "auth_state_table" {
+  source     = "../resources/dynamodb"
+  name       = "${var.project_name}-auth-state"
+  hash_key   = "request_id"
+  tags       = var.tags
+  ttl_enabled = true
+  ttl_attribute_name = "ttl"
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# SNS Topic for Push Notifications
+# ---------------------------------------------------------------------------------------------------------------------
+module "auth_sns_topic" {
+  source     = "../resources/sns"
+  name       = "${var.project_name}-auth-push"
+  kms_key_id = module.kms_key.key_id
+  tags       = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Auth API Lambda (Backend for Mobile App)
+# ---------------------------------------------------------------------------------------------------------------------
+data "archive_file" "auth_api_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/auth_api"
+  output_path = "${path.module}/lambda/auth_api.zip"
+}
+
+resource "aws_iam_role" "auth_api_role" {
+  name = "${var.project_name}-auth-api-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "auth_api_policy" {
+  name = "${var.project_name}-auth-api-policy"
+  role = aws_iam_role.auth_api_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Action = [
+          "dynamodb:UpdateItem",
+          "dynamodb:GetItem"
+        ]
+        Effect   = "Allow"
+        Resource = module.auth_state_table.arn
+      }
+    ]
+  })
+}
+
+module "auth_api_lambda" {
+  source        = "../resources/lambda"
+  filename      = data.archive_file.auth_api_zip.output_path
+  function_name = "${var.project_name}-auth-api"
+  role_arn      = aws_iam_role.auth_api_role.arn
+  handler       = "auth_handler.lambda_handler"
+  runtime       = "python3.11"
+  
+  environment_variables = {
+    AUTH_STATE_TABLE_NAME = module.auth_state_table.name
+  }
+
+  tags = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# CRM Mock API (Internal Microservice)
+# ---------------------------------------------------------------------------------------------------------------------
+data "archive_file" "crm_api_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/crm_api"
+  output_path = "${path.module}/lambda/crm_api.zip"
+}
+
+resource "aws_iam_role" "crm_api_role" {
+  name = "${var.project_name}-crm-api-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "crm_api_policy" {
+  name = "${var.project_name}-crm-api-policy"
+  role = aws_iam_role.crm_api_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
+
+module "crm_api_lambda" {
+  source        = "../resources/lambda"
+  filename      = data.archive_file.crm_api_zip.output_path
+  function_name = "${var.project_name}-crm-api"
+  role_arn      = aws_iam_role.crm_api_role.arn
+  handler       = "crm_handler.lambda_handler"
+  runtime       = "python3.11"
+  
+  environment_variables = {
+    API_KEY = "secret-api-key-123" # In prod, use Secrets Manager
+  }
+
+  tags = var.tags
+}
+
+# Add CRM Route to Auth API Gateway (Shared Gateway)
+resource "aws_apigatewayv2_integration" "crm_integration" {
+  api_id           = module.auth_api_gateway.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = module.crm_api_lambda.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "crm_route" {
+  api_id    = module.auth_api_gateway.id
+  route_key = "GET /customer"
+  target    = "integrations/${aws_apigatewayv2_integration.crm_integration.id}"
+}
+
+resource "aws_lambda_permission" "apigw_invoke_crm" {
+  statement_id  = "AllowAPIGatewayInvokeCRM"
+  action        = "lambda:InvokeFunction"
+  function_name = module.crm_api_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.auth_api_gateway.api_execution_arn}/*/*/customer"
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Auth API Gateway (HTTP API)
+# ---------------------------------------------------------------------------------------------------------------------
+resource "aws_cloudwatch_log_group" "auth_api_gw" {
+  name              = "/aws/apigateway/${var.project_name}-auth-api"
+  retention_in_days = 7
+  tags              = var.tags
+}
+
+module "auth_api_gateway" {
+  source              = "../resources/apigateway"
+  name                = "${var.project_name}-auth-api"
+  protocol_type       = "HTTP"
+  stage_name          = "$default"
+  log_destination_arn = aws_cloudwatch_log_group.auth_api_gw.arn
+  log_format          = jsonencode({
+    requestId               = "$context.requestId"
+    sourceIp                = "$context.identity.sourceIp"
+    requestTime             = "$context.requestTime"
+    protocol                = "$context.protocol"
+    httpMethod              = "$context.httpMethod"
+    resourcePath            = "$context.resourcePath"
+    routeKey                = "$context.routeKey"
+    status                  = "$context.status"
+    responseLength          = "$context.responseLength"
+    integrationErrorMessage = "$context.integrationErrorMessage"
+  })
+  tags                = var.tags
+}
+
+resource "aws_apigatewayv2_integration" "auth_integration" {
+  api_id           = module.auth_api_gateway.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = module.auth_api_lambda.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "auth_route" {
+  api_id    = module.auth_api_gateway.id
+  route_key = "POST /auth"
+  target    = "integrations/${aws_apigatewayv2_integration.auth_integration.id}"
+}
+
+resource "aws_lambda_permission" "apigw_invoke" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.auth_api_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.auth_api_gateway.api_execution_arn}/*/*/auth"
+}
+
 
 data "aws_connect_hours_of_operation" "default" {
   instance_id = module.connect_instance.id
