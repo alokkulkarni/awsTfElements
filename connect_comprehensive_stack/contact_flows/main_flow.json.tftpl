@@ -1,172 +1,112 @@
 {
   "Version": "2019-10-30",
-  "StartAction": "SetLogging",
+  "StartAction": "block-logging",
+  "Metadata": {
+    "entryPointPosition": { "x": 20, "y": 20 },
+    "snapToGrid": false,
+    "name": "MainIVRFlow",
+    "description": "Main flow with Lex integration and Agent Routing",
+    "type": "contactFlow",
+    "status": "PUBLISHED",
+    "hash": {}
+  },
   "Actions": [
     {
-      "Identifier": "SetLogging",
-      "Type": "UpdateLoggingBehavior",
+      "Identifier": "block-logging",
+      "Type": "UpdateFlowLoggingBehavior",
       "Parameters": {
-        "Behavior": "Enable"
+        "FlowLoggingBehavior": "Enabled"
       },
       "Transitions": {
-        "NextAction": "SetVoice"
+        "NextAction": "block-get-input",
+        "Errors": []
       }
     },
     {
-      "Identifier": "SetVoice",
-      "Type": "UpdateContactTextToSpeechVoice",
-      "Parameters": {
-        "TextToSpeechVoice": "Amy"
-      },
-      "Transitions": {
-        "NextAction": "WelcomeMessage"
-      }
-    },
-    {
-      "Identifier": "WelcomeMessage",
-      "Type": "MessageParticipant",
-      "Parameters": {
-        "Text": "Welcome to Connect Comprehensive. How can I help you today?"
-      },
-      "Transitions": {
-        "NextAction": "GetCustomerInput"
-      }
-    },
-    {
-      "Identifier": "GetCustomerInput",
+      "Identifier": "block-get-input",
       "Type": "ConnectParticipantWithLexBot",
       "Parameters": {
-        "LexV2BotAliasArn": "${lex_bot_alias_arn}",
-        "LexV2BotLocaleId": "${locale}"
+        "Text": "Welcome to Connect Comprehensive. How can I help you today?",
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
       },
       "Transitions": {
-        "NextAction": "CheckIntent",
+        "NextAction": "block-disconnect",
         "Errors": [
-          {
-            "NextAction": "TransferToGeneral",
-            "ErrorType": "NoMatchingError"
-          },
-          {
-            "NextAction": "TransferToGeneral",
-            "ErrorType": "NoMatchingCondition"
-          }
-        ]
-      }
-    },
-    {
-      "Identifier": "CheckIntent",
-      "Type": "CheckContactAttributes",
-      "Parameters": {
-        "Attribute": "Lex.IntentName"
-      },
-      "Transitions": {
-        "NextAction": "TransferToGeneral",
+          { "NextAction": "block-error-nomatch", "ErrorType": "NoMatchingCondition" },
+          { "NextAction": "block-error-system", "ErrorType": "NoMatchingError" }
+        ],
         "Conditions": [
-          {
-            "NextAction": "TransferToAccount",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": [
-                "CheckBalance"
-              ]
-            }
-          },
-          {
-            "NextAction": "TransferToLending",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": [
-                "LoanInquiry"
-              ]
-            }
-          },
-          {
-            "NextAction": "TransferToOnboarding",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": [
-                "OnboardingStatus"
-              ]
-            }
-          },
-          {
-            "NextAction": "TransferToGeneral",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": [
-                "TransferToAgent"
-              ]
-            }
-          }
+          { "NextAction": "block-set-queue-account", "Condition": { "Operator": "Equals", "Operands": ["CheckBalance"] } },
+          { "NextAction": "block-set-queue-lending", "Condition": { "Operator": "Equals", "Operands": ["LoanInquiry"] } },
+          { "NextAction": "block-set-queue-onboarding", "Condition": { "Operator": "Equals", "Operands": ["OnboardingStatus"] } },
+          { "NextAction": "block-set-queue-general", "Condition": { "Operator": "Equals", "Operands": ["TransferToAgent"] } }
         ]
       }
     },
     {
-      "Identifier": "TransferToAccount",
-      "Type": "TransferToQueue",
-      "Parameters": {
-        "QueueId": "${account_queue_arn}"
-      },
+      "Identifier": "block-set-queue-account",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": { "QueueId": "${account_queue_arn}" },
+      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
+    },
+    {
+      "Identifier": "block-set-queue-lending",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": { "QueueId": "${lending_queue_arn}" },
+      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
+    },
+    {
+      "Identifier": "block-set-queue-onboarding",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": { "QueueId": "${onboarding_queue_arn}" },
+      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
+    },
+    {
+      "Identifier": "block-set-queue-general",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": { "QueueId": "${general_queue_arn}" },
+      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
+    },
+    {
+      "Identifier": "block-transfer",
+      "Type": "TransferContactToQueue",
+      "Parameters": {},
       "Transitions": {
-        "NextAction": "Disconnect",
+        "NextAction": "block-disconnect",
         "Errors": [
-          {
-            "NextAction": "Disconnect",
-            "ErrorType": "NoMatchingError"
-          }
+          { "NextAction": "block-error-msg", "ErrorType": "QueueAtCapacity" },
+          { "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }
         ]
       }
     },
     {
-      "Identifier": "TransferToLending",
-      "Type": "TransferToQueue",
+      "Identifier": "block-error-msg",
+      "Type": "MessageParticipant",
       "Parameters": {
-        "QueueId": "${lending_queue_arn}"
+        "Text": "I'm sorry, I encountered an error or didn't understand. Please try again later."
       },
-      "Transitions": {
-        "NextAction": "Disconnect",
-        "Errors": [
-          {
-            "NextAction": "Disconnect",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
+      "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
     },
     {
-      "Identifier": "TransferToOnboarding",
-      "Type": "TransferToQueue",
+      "Identifier": "block-error-nomatch",
+      "Type": "MessageParticipant",
       "Parameters": {
-        "QueueId": "${onboarding_queue_arn}"
+        "Text": "I did not understand what you said. Please try again."
       },
-      "Transitions": {
-        "NextAction": "Disconnect",
-        "Errors": [
-          {
-            "NextAction": "Disconnect",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
+      "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
     },
     {
-      "Identifier": "TransferToGeneral",
-      "Type": "TransferToQueue",
+      "Identifier": "block-error-system",
+      "Type": "MessageParticipant",
       "Parameters": {
-        "QueueId": "${general_queue_arn}"
+        "Text": "There was a system error connecting to the bot."
       },
-      "Transitions": {
-        "NextAction": "Disconnect",
-        "Errors": [
-          {
-            "NextAction": "Disconnect",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
+      "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
     },
     {
-      "Identifier": "Disconnect",
+      "Identifier": "block-disconnect",
       "Type": "DisconnectParticipant",
       "Parameters": {},
       "Transitions": {}

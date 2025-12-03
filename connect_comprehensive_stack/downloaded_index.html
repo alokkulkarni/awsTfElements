@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="referrer" content="origin">
     <title>Custom CCP - Connect Comprehensive</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; }
@@ -76,20 +75,11 @@
     <div id="login-screen">
         <div id="login-card">
             <h2 style="margin-top: 0;">Agent Workspace</h2>
-            <p style="color: #666; margin-bottom: 20px;">Click below to initialize the Contact Control Panel.</p>
-            <p style="font-size: 0.85em; color: #888;">Instance: <strong>${instance_alias}</strong></p>
-            
-            <!-- Step 1: Initialize (User Gesture Required for Storage Access) -->
-            <button id="init-btn" onclick="initializeCCP()">Initialize CCP</button>
-            
-            <!-- Step 2: Login (If needed) -->
-            <button id="login-btn" onclick="handleLogin()" style="display: none; background-color: #444;">Log In to Amazon Connect</button>
-            
-            <!-- Step 3: Retry (After Login) -->
-            <button id="retry-btn" onclick="window.location.reload()" style="display: none; background-color: #28a745; margin-top: 10px;">I've Logged In - Refresh Page</button>
-
+            <p style="color: #666; margin-bottom: 20px;">Please log in to access the Contact Control Panel.</p>
+            <p style="font-size: 0.85em; color: #888;">Instance: <strong>my-connect-instance-demo-123</strong></p>
+            <button id="login-btn" onclick="handleLogin()">Log In to Amazon Connect</button>
             <div id="login-spinner" class="loading-spinner"></div>
-            <p id="login-status" style="margin-top: 15px; font-size: 0.9em; color: #666; display: none;">Initializing...</p>
+            <p id="login-status" style="margin-top: 15px; font-size: 0.9em; color: #666; display: none;">Waiting for authentication...</p>
         </div>
     </div>
 
@@ -134,19 +124,16 @@
         </div>
     </div>
 
-        <!-- Connect Streams API (CDN for latest version) -->
-    <script src="https://amazon-connect.github.io/amazon-connect-streams/release/connect-streams-min.js"></script>
+        <!-- Connect Streams API (Self-Hosted) -->
+    <script src="connect-streams-min.js"></script>
     <script>
-        const instanceAlias = "${instance_alias}"; 
-                    const region = "${region}";
-                    // Use string concatenation to avoid any template interpolation issues
-                    // Updated to use the redirected path /ccp-v2/ instead of /connect/ccp-v2/
-                    const ccpUrl = "https://" + instanceAlias + ".my.connect.aws/ccp-v2/";
-                    // Point login directly to CCP to avoid permission issues with the main dashboard
-                    const loginUrl = "https://" + instanceAlias + ".my.connect.aws/ccp-v2/";
-                    
-                    console.log("CCP URL configured as:", ccpUrl);
-                    console.log("CCP Version: 2025-12-03-v2 (CDN Version + Login Fix)");
+        const instanceAlias = "my-connect-instance-demo-123"; 
+        const region = "eu-west-2";
+        // Use string concatenation to avoid any template interpolation issues
+        const ccpUrl = "https://" + instanceAlias + ".my.connect.aws/connect/ccp-v2/";
+        const loginUrl = "https://" + instanceAlias + ".my.connect.aws/connect/ccp-v2/";
+        
+        console.log("CCP URL configured as:", ccpUrl);
         document.getElementById("ccp-url-display").innerText = ccpUrl;
 
         let loginWindow;
@@ -154,7 +141,6 @@
         // Initialize CCP
         connect.core.initCCP(document.getElementById("ccp-container"), {
             ccpUrl: ccpUrl,
-            loginUrl: loginUrl,
             loginPopup: false, // We handle popup manually
             loginPopupAutoClose: true,
             region: region,
@@ -174,7 +160,7 @@
             const left = (screen.width / 2) - (width / 2);
             const top = (screen.height / 2) - (height / 2);
             
-            loginWindow = window.open(loginUrl, 'connect_login', `width=$${width},height=$${height},top=$${top},left=$${left}`);
+            loginWindow = window.open(loginUrl, 'connect_login', `width=${width},height=${height},top=${top},left=${left}`);
             
             document.getElementById("login-btn").style.display = "none";
             document.getElementById("login-spinner").style.display = "block";
@@ -193,17 +179,6 @@
             // Switch to Dashboard
             document.getElementById("login-screen").style.display = "none";
             document.getElementById("dashboard-container").style.display = "flex";
-        });
-
-        // Handle ACK Timeout (Often due to 3rd party cookies)
-        connect.core.getEventBus().subscribe(connect.EventType.ACK_TIMEOUT, function() {
-            console.warn("ACK_TIMEOUT detected. Possible causes: 3rd party cookies blocked, or login required.");
-            document.getElementById("login-status").innerHTML = 
-                "<span style='color: red; font-weight: bold;'>Connection Timeout.</span><br>" +
-                "Please ensure <strong>Third-Party Cookies</strong> are enabled in your browser.<br>" +
-                "If you are using Incognito mode, you must allow cookies for [*.]connect.aws.";
-            document.getElementById("login-btn").style.display = "block";
-            document.getElementById("login-spinner").style.display = "none";
         });
 
         // Event: Contact Incoming/Connected

@@ -146,6 +146,11 @@ data "aws_connect_security_profile" "agent" {
   name        = "Agent"
 }
 
+data "aws_connect_security_profile" "admin" {
+  instance_id = module.connect_instance.id
+  name        = "Admin"
+}
+
 resource "aws_connect_routing_profile" "main" {
   instance_id = module.connect_instance.id
   name        = "Main Routing Profile"
@@ -190,7 +195,7 @@ resource "aws_connect_user" "agent" {
   password           = "Password123!"
   routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
   security_profile_ids = [
-    data.aws_connect_security_profile.agent.security_profile_id
+    data.aws_connect_security_profile.admin.security_profile_id
   ]
 
   identity_info {
@@ -345,8 +350,23 @@ module "lex_bot" {
 }
 
 # We need to define the Bot Locale, Intents, and Slots explicitly as the module is minimal
-# Note: The module creates the locale "en_US" and a FallbackIntent.
+# Note: The module creates the locale "en_GB" and a FallbackIntent.
+# We also create en_US locale to support Connect's default voice settings
 
+# Create en_US locale in addition to en_GB
+resource "aws_lexv2models_bot_locale" "en_us" {
+  bot_id          = module.lex_bot.bot_id
+  bot_version     = "DRAFT"
+  locale_id       = "en_US"
+  n_lu_intent_confidence_threshold = 0.40
+  
+  voice_settings {
+    voice_id = "Joanna"
+    engine   = "neural"
+  }
+}
+
+# Create intents in en_GB locale (from module)
 resource "aws_lexv2models_intent" "intents" {
   for_each = var.lex_intents
 
@@ -371,6 +391,33 @@ resource "aws_lexv2models_intent" "intents" {
   }
 }
 
+# Create the same intents in en_US locale
+resource "aws_lexv2models_intent" "intents_en_us" {
+  for_each = var.lex_intents
+
+  bot_id      = module.lex_bot.bot_id
+  bot_version = "DRAFT"
+  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
+  name        = each.key
+  description = each.value.description
+
+  dynamic "sample_utterance" {
+    for_each = each.value.utterances
+    content {
+      utterance = sample_utterance.value
+    }
+  }
+
+  dynamic "fulfillment_code_hook" {
+    for_each = each.value.fulfillment_enabled ? [1] : []
+    content {
+      enabled = true
+    }
+  }
+
+  depends_on = [aws_lexv2models_bot_locale.en_us]
+}
+
 # Permission for Lex to invoke Lambda
 resource "aws_lambda_permission" "lex_invoke" {
   statement_id  = "AllowLexInvoke"
@@ -380,17 +427,142 @@ resource "aws_lambda_permission" "lex_invoke" {
   source_arn    = module.lex_bot.bot_arn
 }
 
-# Create Bot Version AFTER all intents are defined
+# Build both bot locales before creating version
+resource "null_resource" "build_bot_locales" {
+  triggers = {
+    bot_id = module.lex_bot.bot_id
+    intents_hash = sha256(jsonencode([
+      for k, v in aws_lexv2models_intent.intents : k
+    ]))
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      echo "🔨 Building bot locale: ${var.locale}..."
+      aws lexv2-models build-bot-locale \
+        --bot-id ${module.lex_bot.bot_id} \
+        --bot-version DRAFT \
+        --locale-id ${var.locale} \
+        --region ${var.region}
+      
+      echo "🔨 Building bot locale: en_US..."
+      aws lexv2-models build-bot-locale \
+        --bot-id ${module.lex_bot.bot_id} \
+        --bot-version DRAFT \
+        --locale-id en_US \
+        --region ${var.region}
+      
+      echo "⏳ Waiting for locales to build..."
+      sleep 15
+      
+      # Wait and validate en_GB locale is built
+      for i in {1..20}; do
+        STATUS=$(aws lexv2-models describe-bot-locale \
+          --bot-id ${module.lex_bot.bot_id} \
+          --bot-version DRAFT \
+          --locale-id ${var.locale} \
+          --region ${var.region} \
+          --query 'botLocaleStatus' \
+          --output text)
+        
+        echo "  ${var.locale} status: $STATUS (attempt $i/20)"
+        
+        if [ "$STATUS" = "Built" ]; then
+          echo "✅ ${var.locale} locale built successfully"
+          break
+        elif [ "$STATUS" = "Failed" ]; then
+          echo "❌ ${var.locale} locale build failed"
+          exit 1
+        fi
+        
+        if [ $i -eq 20 ]; then
+          echo "⚠️  Timeout waiting for ${var.locale} locale to build"
+          exit 1
+        fi
+        
+        sleep 5
+      done
+      
+      # Wait and validate en_US locale is built
+      for i in {1..20}; do
+        STATUS=$(aws lexv2-models describe-bot-locale \
+          --bot-id ${module.lex_bot.bot_id} \
+          --bot-version DRAFT \
+          --locale-id en_US \
+          --region ${var.region} \
+          --query 'botLocaleStatus' \
+          --output text)
+        
+        echo "  en_US status: $STATUS (attempt $i/20)"
+        
+        if [ "$STATUS" = "Built" ]; then
+          echo "✅ en_US locale built successfully"
+          break
+        elif [ "$STATUS" = "Failed" ]; then
+          echo "❌ en_US locale build failed"
+          exit 1
+        fi
+        
+        if [ $i -eq 20 ]; then
+          echo "⚠️  Timeout waiting for en_US locale to build"
+          exit 1
+        fi
+        
+        sleep 5
+      done
+      
+      echo "✅ All bot locales built successfully"
+    EOT
+  }
+
+  depends_on = [
+    aws_lexv2models_intent.intents,
+    aws_lexv2models_intent.intents_en_us
+  ]
+}
+
+# Create Bot Version AFTER all intents are defined and locales are built
 resource "aws_lexv2models_bot_version" "this" {
   bot_id = module.lex_bot.bot_id
   locale_specification = {
     (var.locale) = {
       source_bot_version = "DRAFT"
     }
+    "en_US" = {
+      source_bot_version = "DRAFT"
+    }
   }
   depends_on = [
-    aws_lexv2models_intent.intents
+    null_resource.build_bot_locales
   ]
+}
+
+# CloudWatch Log Group for Lex Conversation Logs
+resource "aws_cloudwatch_log_group" "lex_logs" {
+  name              = "/aws/lex/${var.project_name}-bot"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "aws_cloudwatch_log_resource_policy" "lex_logs" {
+  policy_name = "${var.project_name}-lex-logs-policy"
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lex.amazonaws.com"
+        }
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "${aws_cloudwatch_log_group.lex_logs.arn}:*"
+      }
+    ]
+  })
 }
 
 # Create Bot Alias pointing to the version
@@ -399,6 +571,20 @@ resource "awscc_lex_bot_alias" "this" {
   bot_alias_name = "prod"
   bot_version = aws_lexv2models_bot_version.this.bot_version
   
+  conversation_log_settings = {
+    text_log_settings = [
+      {
+        destination = {
+          cloudwatch = {
+            cloudwatch_log_group_arn = aws_cloudwatch_log_group.lex_logs.arn
+            log_prefix               = "lex-logs"
+          }
+        }
+        enabled = true
+      }
+    ]
+  }
+
   bot_alias_locale_settings = [
     {
       locale_id = var.locale
@@ -411,7 +597,115 @@ resource "awscc_lex_bot_alias" "this" {
           }
         }
       }
+    },
+    {
+      locale_id = "en_US"
+      bot_alias_locale_setting = {
+        enabled = true
+        code_hook_specification = {
+          lambda_code_hook = {
+            lambda_arn = module.lex_fallback_lambda.arn
+            code_hook_interface_version = "1.0"
+          }
+        }
+      }
     }
+  ]
+}
+
+# Validate bot alias is properly configured with both locales
+resource "null_resource" "validate_bot_alias" {
+  triggers = {
+    alias_arn = awscc_lex_bot_alias.this.arn
+    bot_version = aws_lexv2models_bot_version.this.bot_version
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      echo "🔍 Validating bot version ${aws_lexv2models_bot_version.this.bot_version}..."
+      
+      # Validate bot version is available
+      VERSION_STATUS=$(aws lexv2-models describe-bot-version \
+        --bot-id ${module.lex_bot.bot_id} \
+        --bot-version ${aws_lexv2models_bot_version.this.bot_version} \
+        --region ${var.region} \
+        --query 'botStatus' \
+        --output text)
+      
+      if [ "$VERSION_STATUS" != "Available" ]; then
+        echo "❌ Bot version ${aws_lexv2models_bot_version.this.bot_version} status: $VERSION_STATUS (expected: Available)"
+        exit 1
+      fi
+      
+      echo "✅ Bot version ${aws_lexv2models_bot_version.this.bot_version} is Available"
+      
+      # Validate bot alias configuration
+      echo "🔍 Validating bot alias configuration..."
+      
+      ALIAS_DATA=$(aws lexv2-models describe-bot-alias \
+        --bot-id ${module.lex_bot.bot_id} \
+        --bot-alias-id ${awscc_lex_bot_alias.this.bot_alias_id} \
+        --region ${var.region})
+      
+      ALIAS_VERSION=$(echo "$ALIAS_DATA" | jq -r '.botVersion')
+      ALIAS_STATUS=$(echo "$ALIAS_DATA" | jq -r '.botAliasStatus')
+      
+      if [ "$ALIAS_STATUS" != "Available" ]; then
+        echo "❌ Bot alias status: $ALIAS_STATUS (expected: Available)"
+        exit 1
+      fi
+      
+      if [ "$ALIAS_VERSION" != "${aws_lexv2models_bot_version.this.bot_version}" ]; then
+        echo "❌ Bot alias pointing to version $ALIAS_VERSION (expected: ${aws_lexv2models_bot_version.this.bot_version})"
+        exit 1
+      fi
+      
+      echo "✅ Bot alias is Available and pointing to version ${aws_lexv2models_bot_version.this.bot_version}"
+      
+      # Validate both locales are configured
+      LOCALES=$(echo "$ALIAS_DATA" | jq -r '.botAliasLocaleSettings | keys[]' | sort | tr '\n' ',' | sed 's/,$//')
+      
+      if [[ ! "$LOCALES" =~ "en_GB" ]] || [[ ! "$LOCALES" =~ "en_US" ]]; then
+        echo "❌ Bot alias missing required locales. Found: $LOCALES (expected: en_GB, en_US)"
+        exit 1
+      fi
+      
+      echo "✅ Bot alias configured with locales: $LOCALES"
+      
+      # Validate Lambda is configured for both locales
+      for LOCALE in en_GB en_US; do
+        LAMBDA_ARN=$(echo "$ALIAS_DATA" | jq -r ".botAliasLocaleSettings.\"$LOCALE\".codeHookSpecification.lambdaCodeHook.lambdaARN")
+        ENABLED=$(echo "$ALIAS_DATA" | jq -r ".botAliasLocaleSettings.\"$LOCALE\".enabled")
+        
+        if [ "$ENABLED" != "true" ]; then
+          echo "❌ Locale $LOCALE is not enabled"
+          exit 1
+        fi
+        
+        if [ "$LAMBDA_ARN" != "${module.lex_fallback_lambda.arn}" ]; then
+          echo "❌ Locale $LOCALE Lambda ARN mismatch"
+          echo "   Expected: ${module.lex_fallback_lambda.arn}"
+          echo "   Found: $LAMBDA_ARN"
+          exit 1
+        fi
+        
+        echo "✅ Locale $LOCALE: enabled with Lambda integration"
+      done
+      
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "✅ Bot validation complete!"
+      echo "   Bot ID: ${module.lex_bot.bot_id}"
+      echo "   Bot Version: ${aws_lexv2models_bot_version.this.bot_version}"
+      echo "   Bot Alias: ${awscc_lex_bot_alias.this.bot_alias_id}"
+      echo "   Locales: en_GB, en_US (both enabled with Lambda)"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    EOT
+  }
+
+  depends_on = [
+    awscc_lex_bot_alias.this
   ]
 }
 
@@ -677,12 +971,13 @@ resource "aws_connect_contact_flow" "main_flow" {
   description = "Main flow with Lex integration and Agent Routing"
   type        = "CONTACT_FLOW"
   content = templatefile("${path.module}/${var.contact_flow_template_path}", {
+    lex_bot_name         = "${var.project_name}-bot"
     lex_bot_alias_arn    = awscc_lex_bot_alias.this.arn
     general_queue_arn    = aws_connect_queue.queues["GeneralAgentQueue"].arn
     account_queue_arn    = aws_connect_queue.queues["AccountQueue"].arn
     lending_queue_arn    = aws_connect_queue.queues["LendingQueue"].arn
     onboarding_queue_arn = aws_connect_queue.queues["OnboardingQueue"].arn
-    locale               = replace(var.locale, "_", "-")
+    locale               = var.locale
   })
   tags = var.tags
 
