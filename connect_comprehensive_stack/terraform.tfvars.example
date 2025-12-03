@@ -28,6 +28,7 @@ queues = {
 # Feature Flags
 enable_voice_id       = false
 enable_pin_validation = true
+enable_companion_auth = false
 
 # Lex Intents to create
 lex_intents = {

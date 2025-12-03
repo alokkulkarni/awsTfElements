@@ -112,6 +112,14 @@ resource "aws_s3_object" "index_html" {
   }))
 }
 
+resource "aws_s3_object" "connect_streams" {
+  bucket       = aws_s3_bucket.ccp_site.id
+  key          = "connect-streams-min.js"
+  source       = "${path.module}/ccp_site/connect-streams-min.js"
+  content_type = "application/javascript"
+  etag         = filemd5("${path.module}/ccp_site/connect-streams-min.js")
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Connect Allowed Origin Association
 # ---------------------------------------------------------------------------------------------------------------------
@@ -125,7 +133,7 @@ resource "null_resource" "associate_origin" {
   }
 
   provisioner "local-exec" {
-    command = "aws connect associate-approved-origin --instance-id ${module.connect_instance.id} --origin https://${aws_cloudfront_distribution.ccp_site.domain_name} --region ${var.region}"
+    command = "${path.module}/scripts/associate_origin.sh ${module.connect_instance.id} https://${aws_cloudfront_distribution.ccp_site.domain_name} ${var.region}"
   }
 }
 

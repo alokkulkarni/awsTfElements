@@ -5,29 +5,99 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Custom CCP - Connect Comprehensive</title>
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; background-color: #f0f2f5; }
-        #container { display: flex; height: 100vh; }
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; }
+        
+        /* Login Screen Styles */
+        #login-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #232f3e 0%, #1a2633 100%);
+            color: white;
+            text-align: center;
+        }
+        #login-card {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            color: #333;
+            max-width: 400px;
+            width: 90%;
+        }
+        #login-btn {
+            background-color: #d13212; /* Connect Orange */
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 20px;
+            width: 100%;
+        }
+        #login-btn:hover { background-color: #a0260e; }
+        
+        /* Dashboard Styles */
+        #dashboard-container { display: none; height: 100vh; }
         #ccp-container { width: 320px; height: 100%; border-right: 1px solid #ccc; background: #fff; }
         #content { flex: 1; padding: 20px; overflow-y: auto; }
-        h1 { color: #232f3e; }
-        .status-box { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px; }
-        .attribute-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        .attribute-table th, .attribute-table td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
-        .attribute-table th { background-color: #f8f9fa; }
-        .sentiment-positive { color: green; font-weight: bold; }
-        .sentiment-negative { color: red; font-weight: bold; }
-        .sentiment-neutral { color: gray; }
+        
+        h1 { color: #232f3e; margin-bottom: 10px; }
+        .status-box { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-top: 20px; border: 1px solid #e1e4e8; }
+        .attribute-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .attribute-table th, .attribute-table td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+        .attribute-table th { background-color: #f8f9fa; color: #555; font-weight: 600; }
+        
+        .sentiment-positive { color: #28a745; font-weight: bold; }
+        .sentiment-negative { color: #dc3545; font-weight: bold; }
+        .sentiment-neutral { color: #6c757d; }
+        
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #d13212;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+            display: none;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div id="container">
+
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div id="login-card">
+            <h2 style="margin-top: 0;">Agent Workspace</h2>
+            <p style="color: #666; margin-bottom: 20px;">Please log in to access the Contact Control Panel.</p>
+            <p style="font-size: 0.85em; color: #888;">Instance: <strong>${instance_alias}</strong></p>
+            <button id="login-btn" onclick="handleLogin()">Log In to Amazon Connect</button>
+            <div id="login-spinner" class="loading-spinner"></div>
+            <p id="login-status" style="margin-top: 15px; font-size: 0.9em; color: #666; display: none;">Waiting for authentication...</p>
+        </div>
+    </div>
+
+    <!-- Main Dashboard (Hidden until authenticated) -->
+    <div id="dashboard-container">
         <div id="ccp-container"></div>
         <div id="content">
-            <h1>Agent Workspace</h1>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1>Agent Workspace</h1>
+                <div style="font-size: 0.9em; color: #666;">
+                    Logged in as: <strong id="agent-name">--</strong>
+                </div>
+            </div>
             
             <div class="status-box">
                 <h3>Connection Status</h3>
-                <p id="status">Initializing...</p>
+                <p id="status">Connected</p>
+                <p style="font-size: 0.8em; color: #666;">CCP URL: <span id="ccp-url-display"></span></p>
             </div>
 
             <div class="status-box">
@@ -47,30 +117,32 @@
                         </tr>
                     </thead>
                     <tbody id="attributes-body">
-                        <tr><td colspan="2">No active contact</td></tr>
+                        <tr><td colspan="2" style="color: #888; font-style: italic;">No active contact</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 
-    <script src="https://global.aws-apps.com/connect-streams-min.js"></script>
+        <!-- Connect Streams API (Self-Hosted) -->
+    <script src="connect-streams-min.js"></script>
     <script>
         const instanceAlias = "${instance_alias}"; 
         const region = "${region}";
-        const ccpUrl = `https://$${instanceAlias}.my.connect.aws/connect/ccp-v2/`;
+        // Use string concatenation to avoid any template interpolation issues
+        const ccpUrl = "https://" + instanceAlias + ".my.connect.aws/connect/ccp-v2/";
+        const loginUrl = "https://" + instanceAlias + ".my.connect.aws/connect/ccp-v2/";
+        
+        console.log("CCP URL configured as:", ccpUrl);
+        document.getElementById("ccp-url-display").innerText = ccpUrl;
 
+        let loginWindow;
+
+        // Initialize CCP
         connect.core.initCCP(document.getElementById("ccp-container"), {
             ccpUrl: ccpUrl,
-            loginPopup: true,
+            loginPopup: false, // We handle popup manually
             loginPopupAutoClose: true,
-            loginOptions: {
-                autoClose: true,
-                height: 600,
-                width: 400,
-                top: 0,
-                left: 0
-            },
             region: region,
             softphone: {
                 allowFramedSoftphone: true,
@@ -80,6 +152,50 @@
                 enableAudioDeviceSettings: true,
                 enablePhoneTypeSettings: true
             }
+        });
+
+        function handleLogin() {
+            const width = 500;
+            const height = 600;
+            const left = (screen.width / 2) - (width / 2);
+            const top = (screen.height / 2) - (height / 2);
+            
+            loginWindow = window.open(loginUrl, 'connect_login', `width=$${width},height=$${height},top=$${top},left=$${left}`);
+            
+            document.getElementById("login-btn").style.display = "none";
+            document.getElementById("login-spinner").style.display = "block";
+            document.getElementById("login-status").style.display = "block";
+        }
+
+        // Event: Agent Authenticated
+        connect.agent(function(agent) {
+            console.log("Agent authenticated:", agent.getName());
+            document.getElementById("agent-name").innerText = agent.getName();
+            
+            if (loginWindow) {
+                loginWindow.close();
+            }
+
+            // Switch to Dashboard
+            document.getElementById("login-screen").style.display = "none";
+            document.getElementById("dashboard-container").style.display = "flex";
+        });
+
+        // Event: Contact Incoming/Connected
+        connect.contact(function(contact) {
+            document.getElementById("status").innerText = "Contact Incoming/Connected";
+            updateAttributes(contact);
+            
+            contact.onRefresh(function(contact) {
+                updateAttributes(contact);
+            });
+
+            contact.onEnded(function() {
+                document.getElementById("status").innerText = "Contact Ended";
+                document.getElementById("attributes-body").innerHTML = "<tr><td colspan='2' style='color: #888; font-style: italic;'>No active contact</td></tr>";
+                document.getElementById("sentiment-score").innerText = "Waiting for data...";
+                document.getElementById("lex-intent").innerText = "--";
+            });
         });
 
         function updateAttributes(contact) {
@@ -94,7 +210,7 @@
                  document.getElementById("lex-intent").innerText = attributes["Lex.IntentName"].value;
             }
 
-            // Check for Sentiment (if passed as custom attribute from flow)
+            // Check for Sentiment
             if (attributes["sentiment"]) {
                 const sentiment = attributes["sentiment"].value;
                 const el = document.getElementById("sentiment-score");
@@ -105,7 +221,9 @@
                 else el.classList.add("sentiment-neutral");
             }
 
+            let hasAttributes = false;
             for (const key in attributes) {
+                hasAttributes = true;
                 const row = document.createElement("tr");
                 const keyCell = document.createElement("td");
                 const valCell = document.createElement("td");
@@ -115,27 +233,11 @@
                 row.appendChild(valCell);
                 tbody.appendChild(row);
             }
-        }
-
-        connect.contact(function(contact) {
-            document.getElementById("status").innerText = "Contact Incoming/Connected";
-            updateAttributes(contact);
             
-            contact.onRefresh(function(contact) {
-                updateAttributes(contact);
-            });
-
-            contact.onEnded(function() {
-                document.getElementById("status").innerText = "Contact Ended";
-                document.getElementById("attributes-body").innerHTML = "<tr><td colspan='2'>No active contact</td></tr>";
-                document.getElementById("sentiment-score").innerText = "Waiting for data...";
-                document.getElementById("lex-intent").innerText = "--";
-            });
-        });
-
-        connect.agent(function(agent) {
-            document.getElementById("status").innerText = "Agent Authenticated: " + agent.getName();
-        });
+            if (!hasAttributes) {
+                 tbody.innerHTML = "<tr><td colspan='2' style='color: #888; font-style: italic;'>No attributes found</td></tr>";
+            }
+        }
     </script>
 </body>
 </html>

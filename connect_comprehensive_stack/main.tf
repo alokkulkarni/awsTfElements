@@ -7,7 +7,7 @@ module "kms_key" {
   source      = "../resources/kms"
   description = "KMS key for Connect Comprehensive Stack"
   tags        = var.tags
-  policy      = jsonencode({
+  policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
@@ -56,6 +56,53 @@ module "connect_instance" {
   tags                      = var.tags
 }
 
+# Claim a Phone Number for Outbound Calls (DID)
+resource "aws_connect_phone_number" "outbound" {
+  target_arn   = module.connect_instance.arn
+  country_code = "GB"
+  type         = "DID"
+  tags         = var.tags
+}
+
+# Claim a Toll-Free Phone Number
+resource "aws_connect_phone_number" "toll_free" {
+  target_arn   = module.connect_instance.arn
+  country_code = "GB"
+  type         = "TOLL_FREE"
+  tags         = var.tags
+}
+
+# Associate Phone Numbers with Contact Flow (Inbound)
+resource "null_resource" "associate_phone_numbers" {
+  triggers = {
+    instance_id     = module.connect_instance.id
+    contact_flow_id = aws_connect_contact_flow.main_flow.contact_flow_id
+    outbound_id     = aws_connect_phone_number.outbound.id
+    toll_free_id    = aws_connect_phone_number.toll_free.id
+    region          = var.region
+  }
+
+  provisioner "local-exec" {
+    command = "aws connect associate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.outbound_id} --contact-flow-id ${self.triggers.contact_flow_id} --region ${self.triggers.region}"
+  }
+
+  provisioner "local-exec" {
+    command = "aws connect associate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --contact-flow-id ${self.triggers.contact_flow_id} --region ${self.triggers.region}"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.outbound_id} --region ${self.triggers.region} || true"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --region ${self.triggers.region} || true"
+  }
+  
+  depends_on = [aws_connect_contact_flow.main_flow]
+}
+
 # Connect Storage Configuration
 resource "aws_connect_instance_storage_config" "chat_transcripts" {
   instance_id   = module.connect_instance.id
@@ -63,11 +110,11 @@ resource "aws_connect_instance_storage_config" "chat_transcripts" {
 
   storage_config {
     s3_config {
-      bucket_name = module.connect_storage_bucket.id
+      bucket_name   = module.connect_storage_bucket.id
       bucket_prefix = "chat-transcripts"
       encryption_config {
         encryption_type = "KMS"
-        key_id          = module.kms_key.key_id
+        key_id          = module.kms_key.arn
       }
     }
     storage_type = "S3"
@@ -80,60 +127,95 @@ resource "aws_connect_instance_storage_config" "call_recordings" {
 
   storage_config {
     s3_config {
-      bucket_name = module.connect_storage_bucket.id
+      bucket_name   = module.connect_storage_bucket.id
       bucket_prefix = "call-recordings"
       encryption_config {
         encryption_type = "KMS"
-        key_id          = module.kms_key.key_id
+        key_id          = module.kms_key.arn
       }
     }
     storage_type = "S3"
   }
 }
 
-resource "aws_connect_instance_storage_config" "real_time_analysis" {
-  instance_id   = module.connect_instance.id
-  resource_type = "REAL_TIME_CONTACT_ANALYSIS_SEGMENTS"
-
-  storage_config {
-    s3_config {
-      bucket_name = module.connect_storage_bucket.id
-      bucket_prefix = "real-time-analysis"
-      encryption_config {
-        encryption_type = "KMS"
-        key_id          = module.kms_key.key_id
-      }
-    }
-    storage_type = "S3"
-  }
+# ---------------------------------------------------------------------------------------------------------------------
+# Default Agent User
+# ---------------------------------------------------------------------------------------------------------------------
+data "aws_connect_security_profile" "agent" {
+  instance_id = module.connect_instance.id
+  name        = "Agent"
 }
 
-resource "aws_connect_instance_storage_config" "contact_trace_records" {
-  instance_id   = module.connect_instance.id
-  resource_type = "CONTACT_TRACE_RECORDS"
+resource "aws_connect_routing_profile" "main" {
+  instance_id = module.connect_instance.id
+  name        = "Main Routing Profile"
+  description = "Profile with outbound calling enabled"
+  default_outbound_queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
 
-  storage_config {
-    s3_config {
-      bucket_name = module.connect_storage_bucket.id
-      bucket_prefix = "contact-trace-records"
-      encryption_config {
-        encryption_type = "KMS"
-        key_id          = module.kms_key.key_id
-      }
-    }
-    storage_type = "S3"
+  media_concurrencies {
+    channel     = "VOICE"
+    concurrency = 1
   }
+  
+  media_concurrencies {
+    channel     = "CHAT"
+    concurrency = 2
+  }
+  
+  media_concurrencies {
+    channel     = "TASK"
+    concurrency = 10
+  }
+
+  queue_configs {
+    channel  = "VOICE"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+  }
+  
+  queue_configs {
+    channel  = "CHAT"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+  }
+  
+  tags = var.tags
+}
+
+resource "aws_connect_user" "agent" {
+  instance_id        = module.connect_instance.id
+  name               = "agent1"
+  password           = "Password123!"
+  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
+  security_profile_ids = [
+    data.aws_connect_security_profile.agent.security_profile_id
+  ]
+
+  identity_info {
+    first_name = "Agent"
+    last_name  = "One"
+    email      = "agent1@example.com"
+  }
+
+  phone_config {
+    phone_type  = "SOFT_PHONE"
+    auto_accept = true
+  }
+
+  tags = var.tags
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
 # DynamoDB for New Intent Logging
 # ---------------------------------------------------------------------------------------------------------------------
 module "intent_table" {
-  source     = "../resources/dynamodb"
-  name       = "${var.project_name}-new-intents"
-  hash_key   = "utterance"
-  range_key  = "timestamp"
-  tags       = var.tags
+  source    = "../resources/dynamodb"
+  name      = "${var.project_name}-new-intents"
+  hash_key  = "utterance"
+  range_key = "timestamp"
+  tags      = var.tags
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -202,7 +284,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "dynamodb:PutItem",
           "dynamodb:GetItem"
         ]
-        Effect   = "Allow"
+        Effect = "Allow"
         Resource = [
           module.intent_table.arn,
           module.auth_state_table.arn
@@ -232,7 +314,7 @@ module "lex_fallback_lambda" {
   role_arn      = aws_iam_role.lambda_role.arn
   handler       = var.lex_fallback_lambda.handler
   runtime       = var.lex_fallback_lambda.runtime
-  
+
   environment_variables = {
     INTENT_TABLE_NAME     = module.intent_table.name
     AUTH_STATE_TABLE_NAME = module.auth_state_table.name
@@ -245,7 +327,7 @@ module "lex_fallback_lambda" {
   }
 
   tags = var.tags
-  
+
   depends_on = [aws_cloudwatch_log_group.lex_fallback]
 }
 
@@ -273,7 +355,7 @@ resource "aws_lexv2models_intent" "intents" {
   locale_id   = module.lex_bot.locale_id
   name        = each.key
   description = each.value.description
-  
+
   dynamic "sample_utterance" {
     for_each = each.value.utterances
     content {
@@ -298,17 +380,57 @@ resource "aws_lambda_permission" "lex_invoke" {
   source_arn    = module.lex_bot.bot_arn
 }
 
+# Create Bot Version AFTER all intents are defined
+resource "aws_lexv2models_bot_version" "this" {
+  bot_id = module.lex_bot.bot_id
+  locale_specification = {
+    (var.locale) = {
+      source_bot_version = "DRAFT"
+    }
+  }
+  depends_on = [
+    aws_lexv2models_intent.intents
+  ]
+}
+
+# Create Bot Alias pointing to the version
+resource "awscc_lex_bot_alias" "this" {
+  bot_id      = module.lex_bot.bot_id
+  bot_alias_name = "prod"
+  bot_version = aws_lexv2models_bot_version.this.bot_version
+  
+  bot_alias_locale_settings = [
+    {
+      locale_id = var.locale
+      bot_alias_locale_setting = {
+        enabled = true
+        code_hook_specification = {
+          lambda_code_hook = {
+            lambda_arn = module.lex_fallback_lambda.arn
+            code_hook_interface_version = "1.0"
+          }
+        }
+      }
+    }
+  ]
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Connect Queue & Routing Profile
 # ---------------------------------------------------------------------------------------------------------------------
 resource "aws_connect_queue" "queues" {
   for_each = var.queues
 
-  instance_id = module.connect_instance.id
-  name        = each.key
-  description = each.value.description
+  instance_id           = module.connect_instance.id
+  name                  = each.key
+  description           = each.value.description
   hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
-  tags        = var.tags
+  tags                  = var.tags
+
+  outbound_caller_config {
+    outbound_caller_id_name      = "Connect Support"
+    outbound_caller_id_number_id = aws_connect_phone_number.outbound.id
+  }
 }
 
 # Note: The connect module might not output hours_of_operation_id. 
@@ -318,11 +440,11 @@ resource "aws_connect_queue" "queues" {
 # Auth State Table (DynamoDB)
 # ---------------------------------------------------------------------------------------------------------------------
 module "auth_state_table" {
-  source     = "../resources/dynamodb"
-  name       = "${var.project_name}-auth-state"
-  hash_key   = "request_id"
-  tags       = var.tags
-  ttl_enabled = true
+  source             = "../resources/dynamodb"
+  name               = "${var.project_name}-auth-state"
+  hash_key           = "request_id"
+  tags               = var.tags
+  ttl_enabled        = true
   ttl_attribute_name = "ttl"
 }
 
@@ -397,7 +519,7 @@ module "auth_api_lambda" {
   role_arn      = aws_iam_role.auth_api_role.arn
   handler       = "auth_handler.lambda_handler"
   runtime       = "python3.11"
-  
+
   environment_variables = {
     AUTH_STATE_TABLE_NAME = module.auth_state_table.name
   }
@@ -458,7 +580,7 @@ module "crm_api_lambda" {
   role_arn      = aws_iam_role.crm_api_role.arn
   handler       = "crm_handler.lambda_handler"
   runtime       = "python3.11"
-  
+
   environment_variables = {
     API_KEY = "secret-api-key-123" # In prod, use Secrets Manager
   }
@@ -468,9 +590,9 @@ module "crm_api_lambda" {
 
 # Add CRM Route to Auth API Gateway (Shared Gateway)
 resource "aws_apigatewayv2_integration" "crm_integration" {
-  api_id           = module.auth_api_gateway.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = module.crm_api_lambda.invoke_arn
+  api_id                 = module.auth_api_gateway.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.crm_api_lambda.invoke_arn
   payload_format_version = "2.0"
 }
 
@@ -503,7 +625,7 @@ module "auth_api_gateway" {
   protocol_type       = "HTTP"
   stage_name          = "$default"
   log_destination_arn = aws_cloudwatch_log_group.auth_api_gw.arn
-  log_format          = jsonencode({
+  log_format = jsonencode({
     requestId               = "$context.requestId"
     sourceIp                = "$context.identity.sourceIp"
     requestTime             = "$context.requestTime"
@@ -515,13 +637,13 @@ module "auth_api_gateway" {
     responseLength          = "$context.responseLength"
     integrationErrorMessage = "$context.integrationErrorMessage"
   })
-  tags                = var.tags
+  tags = var.tags
 }
 
 resource "aws_apigatewayv2_integration" "auth_integration" {
-  api_id           = module.auth_api_gateway.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = module.auth_api_lambda.invoke_arn
+  api_id                 = module.auth_api_gateway.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.auth_api_lambda.invoke_arn
   payload_format_version = "2.0"
 }
 
@@ -550,12 +672,12 @@ data "aws_connect_hours_of_operation" "default" {
 # ---------------------------------------------------------------------------------------------------------------------
 # This defines the IVR/Chat experience
 resource "aws_connect_contact_flow" "main_flow" {
-  instance_id  = module.connect_instance.id
-  name         = "MainIVRFlow"
-  description  = "Main flow with Lex integration and Agent Routing"
-  type         = "CONTACT_FLOW"
-  content      = templatefile("${path.module}/${var.contact_flow_template_path}", {
-    lex_bot_name         = module.lex_bot.bot_name
+  instance_id = module.connect_instance.id
+  name        = "MainIVRFlow"
+  description = "Main flow with Lex integration and Agent Routing"
+  type        = "CONTACT_FLOW"
+  content = templatefile("${path.module}/${var.contact_flow_template_path}", {
+    lex_bot_alias_arn    = awscc_lex_bot_alias.this.arn
     general_queue_arn    = aws_connect_queue.queues["GeneralAgentQueue"].arn
     account_queue_arn    = aws_connect_queue.queues["AccountQueue"].arn
     lending_queue_arn    = aws_connect_queue.queues["LendingQueue"].arn
@@ -563,16 +685,27 @@ resource "aws_connect_contact_flow" "main_flow" {
     locale               = replace(var.locale, "_", "-")
   })
   tags = var.tags
+
+  depends_on = [null_resource.lex_bot_association]
 }
 
 
 
 # Associate Lex Bot with Connect Instance
-resource "aws_connect_bot_association" "this" {
-  instance_id = module.connect_instance.id
-  lex_bot {
-    lex_region = var.region
-    name       = module.lex_bot.bot_name
+resource "null_resource" "lex_bot_association" {
+  triggers = {
+    instance_id   = module.connect_instance.id
+    bot_alias_arn = awscc_lex_bot_alias.this.arn
+    region        = var.region
+  }
+
+  provisioner "local-exec" {
+    command = "aws connect associate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region}"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws connect disassociate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region}"
   }
 }
 
@@ -580,12 +713,12 @@ resource "aws_connect_bot_association" "this" {
 # CloudTrail for Auditing
 # ---------------------------------------------------------------------------------------------------------------------
 module "cloudtrail_bucket" {
-  source            = "../resources/s3"
-  bucket_name       = "${var.project_name}-cloudtrail-${data.aws_caller_identity.current.account_id}"
-  enable_lifecycle  = true
-  attach_policy     = true
-  policy            = data.aws_iam_policy_document.cloudtrail_bucket_policy.json
-  tags              = var.tags
+  source           = "../resources/s3"
+  bucket_name      = "${var.project_name}-cloudtrail-${data.aws_caller_identity.current.account_id}"
+  enable_lifecycle = true
+  attach_policy    = true
+  policy           = data.aws_iam_policy_document.cloudtrail_bucket_policy.json
+  tags             = var.tags
 }
 
 data "aws_iam_policy_document" "cloudtrail_bucket_policy" {
@@ -628,10 +761,9 @@ resource "aws_cloudtrail" "main" {
   include_global_service_events = true
   is_multi_region_trail         = true
   enable_logging                = true
+  depends_on                    = [module.cloudtrail_bucket]
   enable_log_file_validation    = true
 
   tags = var.tags
-  
-  depends_on = [module.cloudtrail_bucket]
 }
 

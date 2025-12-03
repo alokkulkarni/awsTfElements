@@ -32,3 +32,23 @@ output "ccp_url" {
   description = "The URL of the custom CCP"
   value       = "https://${aws_cloudfront_distribution.ccp_site.domain_name}"
 }
+
+output "connect_instance_alias" {
+  description = "The alias of the Connect Instance"
+  value       = var.connect_instance_alias
+}
+
+output "connect_instance_access_url" {
+  description = "The access URL for the Connect Instance"
+  value       = "https://${var.connect_instance_alias}.my.connect.aws"
+}
+
+output "did_phone_number" {
+  description = "The claimed DID phone number"
+  value       = aws_connect_phone_number.outbound.phone_number
+}
+
+output "toll_free_phone_number" {
+  description = "The claimed Toll-Free phone number"
+  value       = aws_connect_phone_number.toll_free.phone_number
+}
