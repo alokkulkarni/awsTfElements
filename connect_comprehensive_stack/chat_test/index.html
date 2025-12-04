@@ -47,6 +47,20 @@
             opacity: 0.9;
         }
 
+        .warning-banner {
+            background: #ff6b6b;
+            color: white;
+            padding: 16px 24px;
+            text-align: center;
+            font-weight: bold;
+            border-bottom: 3px solid #ee5253;
+        }
+
+        .warning-banner a {
+            color: #fff;
+            text-decoration: underline;
+        }
+
         .config-section {
             padding: 24px;
             border-bottom: 1px solid #e0e0e0;
@@ -290,6 +304,10 @@
 </head>
 <body>
     <div class="container">
+        <div class="warning-banner">
+            ⚠️ WRONG FILE! Use <a href="/chat.html">chat.html</a> instead - This file calls AWS directly and will fail due to CORS
+        </div>
+        
         <div class="header">
             <h1>🔗 Amazon Connect Chat Test</h1>
             <p>Test your Amazon Connect chat integration with Lex bot</p>

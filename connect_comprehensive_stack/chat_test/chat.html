@@ -280,12 +280,12 @@
 
             <div class="form-group">
                 <label for="instanceId">Connect Instance ID *</label>
-                <input type="text" id="instanceId" placeholder="6e728dc7-049b-46e6-addb-be0784cbb3ef" value="6e728dc7-049b-46e6-addb-be0784cbb3ef">
+                <input type="text" id="instanceId" placeholder="cb8f21a2-98b2-4e68-9f02-8e530a310bdd" value="cb8f21a2-98b2-4e68-9f02-8e530a310bdd">
             </div>
 
             <div class="form-group">
                 <label for="contactFlowId">Contact Flow ID *</label>
-                <input type="text" id="contactFlowId" placeholder="efa7998c-4862-4f2e-9a7b-dde80a266dc7" value="efa7998c-4862-4f2e-9a7b-dde80a266dc7">
+                <input type="text" id="contactFlowId" placeholder="d9f94c3c-7c70-4509-a7b3-dc6264bd7b63" value="d9f94c3c-7c70-4509-a7b3-dc6264bd7b63">
             </div>
 
             <div class="form-group">
@@ -366,8 +366,8 @@
             const contactFlowId = document.getElementById('contactFlowId').value.trim();
             const customerName = document.getElementById('customerName').value.trim() || 'Anonymous';
 
-            if (!instanceId || !contactFlowId) {
-                alert('Please fill in all required fields');
+            if (!apiUrl || !instanceId || !contactFlowId) {
+                alert('Please fill in all required fields including Backend API URL');
                 return;
             }
 
@@ -379,6 +379,9 @@
             try {
                 // Step 1: Start chat contact
                 console.log('Starting chat contact...');
+                console.log('API URL:', apiUrl);
+                console.log('Request payload:', { instanceId, contactFlowId, customerName });
+                
                 const startResponse = await fetch(`${apiUrl}/api/start-chat`, {
                     method: 'POST',
                     headers: {
@@ -389,10 +392,16 @@
                         contactFlowId,
                         customerName
                     })
+                }).catch(err => {
+                    console.error('Fetch failed:', err);
+                    throw new Error(`Network error: ${err.message}. Is the server running on ${apiUrl}?`);
                 });
 
+                console.log('Response status:', startResponse.status);
+                
                 if (!startResponse.ok) {
                     const error = await startResponse.json();
+                    console.error('Server error:', error);
                     throw new Error(error.error || 'Failed to start chat');
                 }
 
@@ -429,9 +438,7 @@
                 if (connectionData.websocket && connectionData.websocket.Url) {
                     setupWebSocket(connectionData.websocket.Url);
                 } else {
-                    // Fallback to polling
-                    console.log('WebSocket not available, using polling...');
-                    startPolling();
+                    throw new Error('WebSocket URL not available');
                 }
 
                 chatSession.isConnected = true;
@@ -464,89 +471,51 @@
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log('WebSocket message:', data);
+                    console.log('WebSocket message received:', JSON.stringify(data, null, 2));
                     
-                    if (data.Type === 'MESSAGE' || data.ContentType === 'text/plain') {
-                        if (data.ParticipantRole === 'AGENT' || data.ParticipantRole === 'SYSTEM') {
-                            const content = data.Content || data.Message;
-                            if (content) {
-                                addMessage(content, 'agent', new Date(data.AbsoluteTime));
-                            }
+                    // Handle different message types
+                    if (data.Type === 'MESSAGE') {
+                        const role = data.ParticipantRole;
+                        const content = data.Content;
+                        
+                        console.log(`Message from ${role}: ${content}`);
+                        
+                        // Show messages from SYSTEM (bot) or AGENT
+                        if (role === 'SYSTEM' || role === 'AGENT') {
+                            addMessage(content, 'agent', new Date(data.AbsoluteTime));
                         }
                     } else if (data.Type === 'EVENT') {
+                        console.log('Event received:', data.ContentType);
                         if (data.ContentType === 'application/vnd.amazonaws.connect.event.chat.ended') {
                             updateStatus('Chat ended by agent', 'disconnected');
                             chatSession.isConnected = false;
                             if (ws) ws.close();
                         }
+                    } else {
+                        console.log('Unknown message type:', data.Type);
                     }
                 } catch (error) {
-                    console.error('Error processing WebSocket message:', error);
+                    console.error('Error processing WebSocket message:', error, event.data);
                 }
             };
 
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
-                // Fallback to polling
-                startPolling();
+                updateStatus('WebSocket connection error', 'disconnected');
             };
 
             ws.onclose = () => {
                 console.log('WebSocket closed');
                 if (chatSession.isConnected) {
-                    // Attempt to reconnect or fallback to polling
-                    startPolling();
+                    updateStatus('WebSocket connection closed', 'disconnected');
+                    chatSession.isConnected = false;
                 }
             };
 
             chatSession.websocket = ws;
         }
 
-        function startPolling() {
-            if (messagePollingInterval) {
-                clearInterval(messagePollingInterval);
-            }
 
-            let lastMessageId = null;
-
-            messagePollingInterval = setInterval(async () => {
-                if (!chatSession.isConnected || !chatSession.connectionToken) {
-                    return;
-                }
-
-                try {
-                    const apiUrl = document.getElementById('apiUrl').value.trim();
-                    const response = await fetch(`${apiUrl}/api/get-transcript`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            connectionToken: chatSession.connectionToken,
-                            maxResults: 15
-                        })
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        
-                        if (data.transcript && data.transcript.length > 0) {
-                            // Process new messages
-                            data.transcript.forEach(item => {
-                                if (item.Id !== lastMessageId && 
-                                    (item.ParticipantRole === 'AGENT' || item.ParticipantRole === 'SYSTEM') &&
-                                    item.Type === 'MESSAGE') {
-                                    addMessage(item.Content, 'agent', new Date(item.AbsoluteTime));
-                                    lastMessageId = item.Id;
-                                }
-                            });
-                        }
-                    }
-                } catch (error) {
-                    console.error('Polling error:', error);
-                }
-            }, 2000); // Poll every 2 seconds
-        }
 
         async function sendMessage() {
             const input = document.getElementById('messageInput');

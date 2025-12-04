@@ -5,7 +5,7 @@
     "entryPointPosition": { "x": 20, "y": 20 },
     "snapToGrid": false,
     "name": "SimpleChatFlow",
-    "description": "Simple chat flow with Lex bot loop",
+    "description": "Simple chat flow with Lex bot",
     "type": "contactFlow",
     "status": "PUBLISHED",
     "hash": {}
@@ -15,13 +15,12 @@
       "Identifier": "block-lex",
       "Type": "ConnectParticipantWithLexBot",
       "Parameters": {
-        "Text": "How can I help you?",
         "LexV2Bot": {
           "AliasArn": "${lex_bot_alias_arn}"
         }
       },
       "Transitions": {
-        "NextAction": "block-lex",
+        "NextAction": "block-disconnect",
         "Errors": [
           {
             "NextAction": "block-disconnect",

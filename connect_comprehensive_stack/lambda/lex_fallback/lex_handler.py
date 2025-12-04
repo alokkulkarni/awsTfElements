@@ -43,6 +43,10 @@ def lambda_handler(event, context):
         # if not is_authenticated(session_attributes):
         #     return start_verification(intent_name)
         return handle_onboarding_status(event, intent_name)
+        
+    elif intent_name == 'TransferToAgent':
+        # Explicitly handle transfer to agent
+        return close_dialog("Fulfilled", "I'll transfer you to an agent now.", intent_name)
 
     # 4. Fallback / Bedrock Classification
     try:

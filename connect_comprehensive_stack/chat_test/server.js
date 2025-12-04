@@ -11,13 +11,47 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// AWS Configuration
-const connectParticipant = new AWS.ConnectParticipant({
-    region: process.env.AWS_REGION || 'eu-west-2'
+// Redirect root to chat.html
+app.get('/', (req, res) => {
+    res.redirect('/chat.html');
 });
 
-const connect = new AWS.Connect({
+// AWS Configuration - Load credentials from AWS config/environment
+// This will automatically use credentials from:
+// 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN)
+// 2. AWS credentials file (~/.aws/credentials)
+// 3. AWS config file (~/.aws/config)
+// 4. IAM role (if running on EC2)
+
+// Use default credential provider chain instead of forcing SharedIniFileCredentials
+// This allows AWS SDK to automatically find credentials
+const awsConfig = {
     region: process.env.AWS_REGION || 'eu-west-2'
+};
+
+// Only set profile if explicitly specified
+if (process.env.AWS_PROFILE) {
+    awsConfig.credentials = new AWS.SharedIniFileCredentials({ profile: process.env.AWS_PROFILE });
+}
+
+AWS.config.update(awsConfig);
+
+const connectParticipant = new AWS.ConnectParticipant();
+const connect = new AWS.Connect();
+
+// Verify credentials on startup
+AWS.config.getCredentials((err) => {
+    if (err) {
+        console.error('❌ Failed to load AWS credentials:', err.message);
+        console.error('Please ensure AWS credentials are configured:');
+        console.error('  - Run "aws configure" to set up credentials');
+        console.error('  - Or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables');
+        console.error('  - Or set AWS_PROFILE environment variable to use a specific profile');
+    } else {
+        console.log('✅ AWS credentials loaded successfully');
+        console.log(`   Region: ${AWS.config.region}`);
+        console.log(`   Access Key ID: ${AWS.config.credentials.accessKeyId.substring(0, 5)}***`);
+    }
 });
 
 // Store active chat sessions
@@ -73,10 +107,16 @@ app.post('/api/start-chat', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error starting chat:', error);
+        console.error('❌ Error starting chat:', {
+            message: error.message,
+            code: error.code,
+            statusCode: error.statusCode,
+            requestId: error.requestId
+        });
         res.status(500).json({ 
             error: error.message,
-            code: error.code 
+            code: error.code,
+            details: 'Check server logs for more information'
         });
     }
 });
@@ -121,6 +161,7 @@ app.post('/api/create-connection', async (req, res) => {
 app.post('/api/send-message', async (req, res) => {
     try {
         const { connectionToken, message, contentType } = req.body;
+        console.log('📤 Sending message:', message);
 
         if (!connectionToken || !message) {
             return res.status(400).json({ error: 'Missing required fields' });
@@ -148,43 +189,7 @@ app.post('/api/send-message', async (req, res) => {
     }
 });
 
-/**
- * Get transcript
- * POST /api/get-transcript
- */
-app.post('/api/get-transcript', async (req, res) => {
-    try {
-        const { connectionToken, maxResults, nextToken } = req.body;
 
-        if (!connectionToken) {
-            return res.status(400).json({ error: 'Missing connectionToken' });
-        }
-
-        const params = {
-            ConnectionToken: connectionToken,
-            MaxResults: maxResults || 15,
-            SortOrder: 'ASCENDING'
-        };
-
-        if (nextToken) {
-            params.NextToken = nextToken;
-        }
-
-        const response = await connectParticipant.getTranscript(params).promise();
-        
-        res.json({
-            transcript: response.Transcript,
-            nextToken: response.NextToken
-        });
-
-    } catch (error) {
-        console.error('Error getting transcript:', error);
-        res.status(500).json({ 
-            error: error.message,
-            code: error.code 
-        });
-    }
-});
 
 /**
  * Disconnect participant
@@ -249,8 +254,19 @@ app.listen(PORT, () => {
    - AWS_SECRET_ACCESS_KEY
    - AWS_SESSION_TOKEN (if using temporary credentials)
 
-🔗 Open http://localhost:${PORT} in your browser to test chat
+🔗 Open http://localhost:${PORT}/chat.html in your browser to test chat
+
+💡 Test the server health: curl http://localhost:${PORT}/health
     `);
+    
+    // Log all registered routes
+    console.log('\n📋 Available endpoints:');
+    console.log('   GET  /health - Health check');
+    console.log('   POST /api/start-chat - Start chat contact');
+    console.log('   POST /api/create-connection - Create participant connection');
+    console.log('   POST /api/send-message - Send chat message');
+    console.log('   POST /api/get-transcript - Get chat transcript');
+    console.log('   POST /api/disconnect - Disconnect chat');
 });
 
 // Cleanup old sessions every hour

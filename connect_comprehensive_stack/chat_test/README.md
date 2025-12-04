@@ -7,7 +7,11 @@ A simple web-based chat interface to test Amazon Connect chat functionality with
 ### Prerequisites
 
 - Node.js (v14 or higher)
-- AWS credentials configured with permissions for:
+- AWS credentials configured via:
+  - AWS CLI (`aws configure`)
+  - AWS credentials file (`~/.aws/credentials`)
+  - Environment variables
+- AWS IAM permissions for:
   - `connect:StartChatContact`
   - `connect:*` (for participant operations)
 - Amazon Connect instance with a contact flow configured
@@ -21,15 +25,35 @@ npm install
 
 ### Configuration
 
-Set your AWS credentials as environment variables:
+The server automatically uses AWS credentials from:
 
-```bash
-export AWS_ACCESS_KEY_ID="your-access-key"
-export AWS_SECRET_ACCESS_KEY="your-secret-key"
-export AWS_REGION="eu-west-2"
-```
+1. **Environment variables** (highest priority):
+   ```bash
+   export AWS_ACCESS_KEY_ID="your-access-key"
+   export AWS_SECRET_ACCESS_KEY="your-secret-key"
+   export AWS_SESSION_TOKEN="your-session-token"  # if using temporary credentials
+   export AWS_REGION="eu-west-2"
+   ```
 
-Or use AWS CLI configured credentials.
+2. **AWS credentials file** (`~/.aws/credentials`):
+   ```ini
+   [default]
+   aws_access_key_id = your-access-key
+   aws_secret_access_key = your-secret-key
+   ```
+
+3. **AWS config file** (`~/.aws/config`):
+   ```ini
+   [default]
+   region = eu-west-2
+   ```
+
+4. **AWS Profile** (optional):
+   ```bash
+   export AWS_PROFILE="your-profile-name"
+   ```
+
+The server will use the `default` profile unless `AWS_PROFILE` is set.
 
 ### Running the Server
 

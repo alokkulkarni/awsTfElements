@@ -66,8 +66,8 @@ variable "lex_intents" {
   default = {
     "TransferToAgent" = {
       description         = "Transfer to a human agent"
-      utterances          = ["I want to speak to a human", "Agent please"]
-      fulfillment_enabled = false
+      utterances          = ["I want to speak to a human", "Agent please", "talk to agent", "speak to someone", "human agent"]
+      fulfillment_enabled = true
     }
     "CheckBalance" = {
       description         = "Check account balance"
