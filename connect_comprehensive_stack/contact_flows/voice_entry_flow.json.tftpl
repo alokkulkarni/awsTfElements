@@ -1,0 +1,138 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "check-hours",
+  "Metadata": {
+    "entryPointPosition": {"x": 20, "y": 20},
+    "snapToGrid": false,
+    "name": "VoiceEntryFlow",
+    "description": "Voice channel entry point with hours check",
+    "type": "contactFlow",
+    "status": "PUBLISHED"
+  },
+  "Actions": [
+    {
+      "Identifier": "check-hours",
+      "Type": "CheckHoursOfOperation",
+      "Parameters": {
+        "HoursOfOperationId": "${hours_of_operation_id}"
+      },
+      "Transitions": {
+        "NextAction": "set-voice-attributes",
+        "Errors": [
+          {"NextAction": "error-handler", "ErrorType": "NoMatchingError"}
+        ],
+        "Conditions": [
+          {
+            "NextAction": "after-hours-flow",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["False"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "set-voice-attributes",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "Channel": "Voice",
+          "EntryPoint": "VoiceEntryFlow",
+          "Timestamp": "$.SystemEndpoint.Date"
+        }
+      },
+      "Transitions": {
+        "NextAction": "play-welcome",
+        "Errors": [
+          {"NextAction": "error-handler", "ErrorType": "NoMatchingError"}
+        ]
+      }
+    },
+    {
+      "Identifier": "play-welcome",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "<speak><prosody rate='medium'>Thank you for calling. Your call may be recorded for quality and training purposes.</prosody><break time='500ms'/></speak>",
+        "TextToSpeechType": "ssml"
+      },
+      "Transitions": {
+        "NextAction": "check-callback-scheduled",
+        "Errors": [
+          {"NextAction": "error-handler", "ErrorType": "NoMatchingError"}
+        ]
+      }
+    },
+    {
+      "Identifier": "check-callback-scheduled",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "CallbackScheduled",
+        "ComparisonValue": "true"
+      },
+      "Transitions": {
+        "NextAction": "voice-ivr",
+        "Errors": [
+          {"NextAction": "voice-ivr", "ErrorType": "NoMatchingError"}
+        ],
+        "Conditions": [
+          {
+            "NextAction": "callback-confirmation",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["true"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "callback-confirmation",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "I see you have a callback scheduled. An agent will contact you shortly at this number."
+      },
+      "Transitions": {
+        "NextAction": "voice-ivr"
+      }
+    },
+    {
+      "Identifier": "voice-ivr",
+      "Type": "TransferContactToFlow",
+      "Parameters": {
+        "ContactFlowId": "${voice_ivr_flow_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {"NextAction": "error-handler", "ErrorType": "NoMatchingError"}
+        ]
+      }
+    },
+    {
+      "Identifier": "after-hours-flow",
+      "Type": "TransferContactToFlow",
+      "Parameters": {
+        "ContactFlowId": "${after_hours_flow_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect"
+      }
+    },
+    {
+      "Identifier": "error-handler",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "I'm sorry, we're experiencing technical difficulties. Please try again later or call our support line."
+      },
+      "Transitions": {
+        "NextAction": "disconnect"
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    }
+  ]
+}

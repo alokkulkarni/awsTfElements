@@ -1,0 +1,225 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "set-chat-attributes",
+  "Metadata": {
+    "entryPointPosition": {"x": 20, "y": 20},
+    "snapToGrid": false,
+    "name": "ChatEntryFlow",
+    "description": "Chat channel entry point with pre-chat form",
+    "type": "contactFlow",
+    "status": "PUBLISHED"
+  },
+  "Actions": [
+    {
+      "Identifier": "set-chat-attributes",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "Channel": "Chat",
+          "EntryPoint": "ChatEntryFlow",
+          "Timestamp": "$.SystemEndpoint.Date"
+        }
+      },
+      "Transitions": {
+        "NextAction": "check-hours",
+        "Errors": [
+          {"NextAction": "error-handler", "ErrorType": "NoMatchingError"}
+        ]
+      }
+    },
+    {
+      "Identifier": "check-hours",
+      "Type": "CheckHoursOfOperation",
+      "Parameters": {
+        "HoursOfOperationId": "${hours_of_operation_id}"
+      },
+      "Transitions": {
+        "NextAction": "send-welcome",
+        "Errors": [
+          {"NextAction": "error-handler", "ErrorType": "NoMatchingError"}
+        ],
+        "Conditions": [
+          {
+            "NextAction": "after-hours-chat",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["False"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "send-welcome",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "👋 Welcome to our banking chat support! I'm here to help you with:\n\n• Account inquiries\n• Card services\n• Loan information\n• Report fraud\n• General questions\n\nHow can I assist you today?"
+      },
+      "Transitions": {
+        "NextAction": "lex-bot-interaction",
+        "Errors": [
+          {"NextAction": "error-handler", "ErrorType": "NoMatchingError"}
+        ]
+      }
+    },
+    {
+      "Identifier": "lex-bot-interaction",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        },
+        "Text": "How can I help you today?"
+      },
+      "Transitions": {
+        "NextAction": "check-transfer-intent",
+        "Errors": [
+          {"NextAction": "lex-error-recovery", "ErrorType": "NoMatchingCondition"},
+          {"NextAction": "lex-error-recovery", "ErrorType": "NoMatchingError"}
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "check-transfer-intent",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "IntentName",
+        "ComparisonValue": "TransferToAgent"
+      },
+      "Transitions": {
+        "NextAction": "ask-more-help",
+        "Conditions": [
+          {
+            "NextAction": "agent-transfer-flow",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["TransferToAgent"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "ask-more-help",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Is there anything else I can help you with today?"
+      },
+      "Transitions": {
+        "NextAction": "wait-response"
+      }
+    },
+    {
+      "Identifier": "wait-response",
+      "Type": "GetParticipantInput",
+      "Parameters": {
+        "Text": "",
+        "DTMF": {
+          "InputTerminationTimeout": "30",
+          "MaxDigits": "1"
+        }
+      },
+      "Transitions": {
+        "NextAction": "survey-flow",
+        "Conditions": [
+          {
+            "NextAction": "lex-bot-interaction",
+            "Condition": {
+              "Operator": "Contains",
+              "Operands": ["yes"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "agent-transfer-flow",
+      "Type": "TransferContactToFlow",
+      "Parameters": {
+        "ContactFlowId": "${agent_transfer_flow_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect"
+      }
+    },
+    {
+      "Identifier": "survey-flow",
+      "Type": "TransferContactToFlow",
+      "Parameters": {
+        "ContactFlowId": "${survey_flow_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect"
+      }
+    },
+    {
+      "Identifier": "after-hours-chat",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for contacting us. Our chat service is currently closed.\n\n🕒 Business Hours: Monday-Friday, 9 AM - 5 PM\n\nFor urgent fraud issues, please call our 24/7 hotline at 0800-123-4567.\n\nWould you like to schedule a callback during business hours?"
+      },
+      "Transitions": {
+        "NextAction": "after-hours-callback-option"
+      }
+    },
+    {
+      "Identifier": "after-hours-callback-option",
+      "Type": "GetParticipantInput",
+      "Parameters": {
+        "Text": "Type 'yes' for callback or 'no' to end chat.",
+        "DTMF": {
+          "InputTerminationTimeout": "30",
+          "MaxDigits": "10"
+        }
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Conditions": [
+          {
+            "NextAction": "callback-module",
+            "Condition": {
+              "Operator": "Contains",
+              "Operands": ["yes"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "callback-module",
+      "Type": "TransferContactToFlow",
+      "Parameters": {
+        "ContactFlowId": "${callback_module_flow_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect"
+      }
+    },
+    {
+      "Identifier": "lex-error-recovery",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "I apologize, I'm having trouble understanding. Let me connect you with an agent who can better assist you."
+      },
+      "Transitions": {
+        "NextAction": "agent-transfer-flow"
+      }
+    },
+    {
+      "Identifier": "error-handler",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "We're experiencing technical difficulties. Please try again later or call us at 0800-123-4567."
+      },
+      "Transitions": {
+        "NextAction": "disconnect"
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    }
+  ]
+}
