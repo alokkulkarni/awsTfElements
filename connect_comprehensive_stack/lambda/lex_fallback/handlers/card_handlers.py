@@ -5,7 +5,7 @@ High-priority intents requiring immediate action and escalation.
 import logging
 from typing import Dict, Any
 from utils import close_dialog, elicit_slot
-from resilience import with_retry, circuit_breaker, TransientError, PermanentError
+from handlers.resilience import with_retry, circuit_breaker, TransientError, PermanentError
 import os
 import boto3
 

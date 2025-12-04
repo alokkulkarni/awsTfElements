@@ -7,9 +7,9 @@ import json
 import logging
 from typing import Dict, Any, Optional
 from handlers import account_handlers, card_handlers, transfer_handlers, loan_handlers
-from utils import close_dialog, elicit_slot, log_new_intent, classify_with_bedrock
+from handlers.resilience import with_retry, circuit_breaker, TransientError
+from utils import close_dialog, elicit_slot, log_new_intent
 from validation import get_customer_identity, is_authenticated
-from resilience import with_retry, circuit_breaker, TransientError
 
 # Configure logging
 logger = logging.getLogger()
@@ -22,36 +22,7 @@ ENABLE_COMPANION_AUTH = os.environ.get('ENABLE_COMPANION_AUTH', 'true').lower() 
 ENABLE_BEDROCK_FALLBACK = os.environ.get('ENABLE_BEDROCK_FALLBACK', 'true').lower() == 'true'
 LEX_CONFIDENCE_THRESHOLD = float(os.environ.get('LEX_CONFIDENCE_THRESHOLD', '0.70'))
 
-# Intent router mapping
-INTENT_HANDLERS = {
-    # Account Services
-    'CheckBalance': account_handlers.handle_check_balance,
-    'TransactionHistory': account_handlers.handle_transaction_history,
-    'AccountDetails': account_handlers.handle_account_details,
-    'RequestStatement': account_handlers.handle_request_statement,
-    
-    # Card Services
-    'ActivateCard': card_handlers.handle_activate_card,
-    'ReportLostStolenCard': card_handlers.handle_lost_stolen_card,
-    'ReportFraud': card_handlers.handle_fraud_report,
-    'ChangePIN': card_handlers.handle_change_pin,
-    'DisputeTransaction': card_handlers.handle_dispute_transaction,
-    
-    # Transfer Services
-    'InternalTransfer': transfer_handlers.handle_internal_transfer,
-    'ExternalTransfer': transfer_handlers.handle_external_transfer,
-    'WireTransfer': transfer_handlers.handle_wire_transfer,
-    
-    # Loan Services
-    'LoanStatus': loan_handlers.handle_loan_status,
-    'LoanPayment': loan_handlers.handle_loan_payment,
-    'LoanApplication': loan_handlers.handle_loan_application,
-    
-    # General Services
-    'TransferToAgent': handle_transfer_to_agent,
-    'BranchLocator': handle_branch_locator,
-    'RoutingNumber': handle_routing_number,
-}
+# Intent router mapping - will be initialized after function definitions
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -303,7 +274,7 @@ def handle_transfer_to_agent(
     session_attributes: Dict[str, str]
 ) -> Dict[str, Any]:
     """
-    Handle explicit agent transfer request.
+    Handle explicit agent transfer request to BasicQueue.
     
     Args:
         event: Lex event
@@ -313,16 +284,18 @@ def handle_transfer_to_agent(
     Returns:
         Lex response confirming agent transfer
     """
-    # Set attributes for queue routing
+    # Set attributes for queue routing to BasicQueue
     transfer_attributes = {
         'TransferReason': session_attributes.get('OriginalIntent', 'CustomerRequest'),
         'CustomerName': customer_data.get('name', 'Unknown'),
         'CustomerId': customer_data.get('customer_id', 'Unknown'),
         'IsAuthenticated': session_attributes.get('isAuthenticated', 'false'),
-        'Priority': session_attributes.get('Priority', 'Normal')
+        'Priority': session_attributes.get('Priority', 'Normal'),
+        'TargetQueue': 'BasicQueue',
+        'TransferType': 'BasicAgent'
     }
     
-    logger.info(f"Agent transfer requested: {json.dumps(transfer_attributes)}")
+    logger.info(f"Agent transfer requested to BasicQueue: {json.dumps(transfer_attributes)}")
     
     return {
         "sessionState": {
@@ -339,6 +312,73 @@ def handle_transfer_to_agent(
             {
                 "contentType": "PlainText",
                 "content": "I'll connect you with an agent right away. Please hold for a moment."
+            }
+        ]
+    }
+
+
+def handle_transfer_to_specialist(
+    event: Dict[str, Any],
+    customer_data: Dict[str, Any],
+    session_attributes: Dict[str, str]
+) -> Dict[str, Any]:
+    """
+    Handle transfer to specialist agent (Main Routing Profile).
+    Used for complex issues requiring senior agent expertise.
+    
+    Args:
+        event: Lex event
+        customer_data: Customer information
+        session_attributes: Session state
+        
+    Returns:
+        Lex response confirming specialist transfer
+    """
+    # Determine specialist queue based on intent or context
+    original_intent = session_attributes.get('OriginalIntent', 'Unknown')
+    
+    # Map intents to specialized queues
+    queue_mapping = {
+        'CheckBalance': 'AccountQueue',
+        'TransactionHistory': 'AccountQueue',
+        'AccountDetails': 'AccountQueue',
+        'MortgageInquiry': 'LendingQueue',
+        'LoanApplication': 'LendingQueue',
+        'LoanStatus': 'LendingQueue',
+        'NewAccount': 'OnboardingQueue',
+        'AccountOpening': 'OnboardingQueue'
+    }
+    
+    target_queue = queue_mapping.get(original_intent, 'GeneralAgentQueue')
+    
+    transfer_attributes = {
+        'TransferReason': f'SpecialistRequired_{original_intent}',
+        'CustomerName': customer_data.get('name', 'Unknown'),
+        'CustomerId': customer_data.get('customer_id', 'Unknown'),
+        'IsAuthenticated': session_attributes.get('isAuthenticated', 'false'),
+        'Priority': 'High',
+        'TargetQueue': target_queue,
+        'TransferType': 'Specialist',
+        'OriginalIntent': original_intent
+    }
+    
+    logger.info(f"Specialist transfer requested to {target_queue}: {json.dumps(transfer_attributes)}")
+    
+    return {
+        "sessionState": {
+            "dialogAction": {
+                "type": "Close"
+            },
+            "intent": {
+                "name": "TransferToSpecialist",
+                "state": "Fulfilled"
+            },
+            "sessionAttributes": {**session_attributes, **transfer_attributes}
+        },
+        "messages": [
+            {
+                "contentType": "PlainText",
+                "content": f"I'll transfer you to a specialist who can better assist you. Please hold while I connect you to our {target_queue.replace('Queue', '')} team."
             }
         ]
     }
@@ -376,6 +416,39 @@ def handle_routing_number(
         f"Your sort code is 12-34-56. Your account number can be found in your online banking or mobile app.",
         "RoutingNumber"
     )
+
+
+# Intent router mapping - initialized after all function definitions
+INTENT_HANDLERS = {
+    # Account Services
+    'CheckBalance': account_handlers.handle_check_balance,
+    'TransactionHistory': account_handlers.handle_transaction_history,
+    'AccountDetails': account_handlers.handle_account_details,
+    'RequestStatement': account_handlers.handle_request_statement,
+    
+    # Card Services
+    'ActivateCard': card_handlers.handle_activate_card,
+    'ReportLostStolenCard': card_handlers.handle_lost_stolen_card,
+    'ReportFraud': card_handlers.handle_fraud_report,
+    'ChangePIN': card_handlers.handle_change_pin,
+    'DisputeTransaction': card_handlers.handle_dispute_transaction,
+    
+    # Transfer Services
+    'InternalTransfer': transfer_handlers.handle_internal_transfer,
+    'ExternalTransfer': transfer_handlers.handle_external_transfer,
+    'WireTransfer': transfer_handlers.handle_wire_transfer,
+    
+    # Loan Services
+    'LoanStatus': loan_handlers.handle_loan_status,
+    'LoanPayment': loan_handlers.handle_loan_payment,
+    'LoanApplication': loan_handlers.handle_loan_application,
+    
+    # General Services
+    'TransferToAgent': handle_transfer_to_agent,
+    'TransferToSpecialist': handle_transfer_to_specialist,
+    'BranchLocator': handle_branch_locator,
+    'RoutingNumber': handle_routing_number,
+}
 
 
 if __name__ == "__main__":

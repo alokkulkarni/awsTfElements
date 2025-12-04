@@ -1,0 +1,52 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "play-prompt",
+  "Metadata": {
+    "entryPointPosition": {"x": 20, "y": 20},
+    "snapToGrid": false,
+    "name": "VoiceIVRFlow",
+    "description": "DTMF menu for voice routing",
+    "type": "contactFlow",
+    "status": "PUBLISHED"
+  },
+  "Actions": [
+    {
+      "Identifier": "play-prompt",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Welcome to our banking services."
+      },
+      "Transitions": {
+        "NextAction": "transfer-to-agent",
+        "Errors": [
+          {
+            "NextAction": "transfer-to-agent",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "transfer-to-agent",
+      "Type": "TransferToQueue",
+      "Parameters": {
+        "QueueId": "${general_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

@@ -76,7 +76,7 @@ resource "aws_connect_phone_number" "toll_free" {
 resource "null_resource" "associate_phone_numbers" {
   triggers = {
     instance_id     = module.connect_instance.id
-    contact_flow_id = aws_connect_contact_flow.main_flow.contact_flow_id
+    contact_flow_id = aws_connect_contact_flow.voice_entry.contact_flow_id
     outbound_id     = aws_connect_phone_number.outbound.id
     toll_free_id    = aws_connect_phone_number.toll_free.id
     region          = var.region
@@ -100,7 +100,7 @@ resource "null_resource" "associate_phone_numbers" {
     command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --region ${self.triggers.region} || true"
   }
   
-  depends_on = [aws_connect_contact_flow.main_flow]
+  depends_on = [aws_connect_contact_flow.voice_entry]
 }
 
 # Connect Storage Configuration
@@ -151,6 +151,14 @@ data "aws_connect_security_profile" "admin" {
   name        = "Admin"
 }
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Routing Profiles
+# ---------------------------------------------------------------------------------------------------------------------
+# Main Routing Profile - Advanced profile with multiple specialized queues
+# - Handles voice (1 concurrent), chat (2 concurrent), and tasks (10 concurrent)
+# - Routes to GeneralAgentQueue only
+# - Enables outbound calling capability
+# - Best for: Senior agents handling general inquiries
 resource "aws_connect_routing_profile" "main" {
   instance_id = module.connect_instance.id
   name        = "Main Routing Profile"
@@ -189,11 +197,80 @@ resource "aws_connect_routing_profile" "main" {
   tags = var.tags
 }
 
-resource "aws_connect_user" "agent" {
+# Basic Routing Profile - Entry-level profile with multiple queue routing
+# - Handles voice (1 concurrent), chat (2 concurrent), and tasks (1 concurrent)
+# - Routes to both BasicQueue and GeneralAgentQueue
+# - Lower task concurrency for training/learning
+# - Best for: New agents, testing, or simple routing scenarios
+resource "aws_connect_routing_profile" "basic" {
+  instance_id = module.connect_instance.id
+  name        = "Basic Routing Profile"
+  description = "Entry-level profile for basic queue routing"
+  default_outbound_queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+
+  media_concurrencies {
+    channel     = "VOICE"
+    concurrency = 1
+  }
+  
+  media_concurrencies {
+    channel     = "CHAT"
+    concurrency = 2
+  }
+  
+  media_concurrencies {
+    channel     = "TASK"
+    concurrency = 1
+  }
+
+  # BasicQueue configuration for both VOICE and CHAT
+  queue_configs {
+    channel  = "VOICE"
+    delay    = 0
+    priority = 1
+    queue_id = data.aws_connect_queue.basic.queue_id
+  }
+  
+  queue_configs {
+    channel  = "CHAT"
+    delay    = 0
+    priority = 1
+    queue_id = data.aws_connect_queue.basic.queue_id
+  }
+
+  # GeneralAgentQueue configuration for both VOICE and CHAT
+  queue_configs {
+    channel  = "VOICE"
+    delay    = 0
+    priority = 2
+    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+  }
+  
+  queue_configs {
+    channel  = "CHAT"
+    delay    = 0
+    priority = 2
+    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+  }
+  
+  tags = var.tags
+}
+
+# Data source to reference the existing BasicQueue (not managed by Terraform)
+data "aws_connect_queue" "basic" {
+  instance_id = module.connect_instance.id
+  name        = "BasicQueue"
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Agent Users
+# ---------------------------------------------------------------------------------------------------------------------
+# Agent 1 - Uses Basic Routing Profile (entry-level)
+resource "aws_connect_user" "agent_basic" {
   instance_id        = module.connect_instance.id
   name               = "agent1"
   password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
+  routing_profile_id = aws_connect_routing_profile.basic.routing_profile_id
   security_profile_ids = [
     data.aws_connect_security_profile.admin.security_profile_id
   ]
@@ -202,6 +279,30 @@ resource "aws_connect_user" "agent" {
     first_name = "Agent"
     last_name  = "One"
     email      = "agent1@example.com"
+  }
+
+  phone_config {
+    phone_type  = "SOFT_PHONE"
+    auto_accept = true
+  }
+
+  tags = var.tags
+}
+
+# Agent 2 - Uses Main Routing Profile (advanced)
+resource "aws_connect_user" "agent_main" {
+  instance_id        = module.connect_instance.id
+  name               = "agent2"
+  password           = "Password123!"
+  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
+  security_profile_ids = [
+    data.aws_connect_security_profile.admin.security_profile_id
+  ]
+
+  identity_info {
+    first_name = "Agent"
+    last_name  = "Two"
+    email      = "agent2@example.com"
   }
 
   phone_config {
@@ -317,18 +418,33 @@ module "lex_fallback_lambda" {
   filename      = data.archive_file.lex_fallback_zip.output_path
   function_name = "${var.project_name}-lex-fallback"
   role_arn      = aws_iam_role.lambda_role.arn
-  handler       = var.lex_fallback_lambda.handler
+  handler       = "enhanced_lex_handler.lambda_handler"  # Updated to use enhanced handler
   runtime       = var.lex_fallback_lambda.runtime
 
   environment_variables = {
+    # Core Tables
     INTENT_TABLE_NAME     = module.intent_table.name
     AUTH_STATE_TABLE_NAME = module.auth_state_table.name
-    SNS_TOPIC_ARN         = module.auth_sns_topic.topic_arn
+    
+    # API Configuration
     CRM_API_ENDPOINT      = "${module.auth_api_gateway.api_endpoint}/customer"
     CRM_API_KEY           = "secret-api-key-123"
+    CORE_BANKING_API_URL  = "https://api.banking.example.com/v1"  # Update with actual URL
+    FRAUD_ALERT_SNS_TOPIC = module.auth_sns_topic.topic_arn
+    
+    # Authentication Settings
+    SNS_TOPIC_ARN         = module.auth_sns_topic.topic_arn
     ENABLE_VOICE_ID       = tostring(var.enable_voice_id)
     ENABLE_PIN_VALIDATION = tostring(var.enable_pin_validation)
     ENABLE_COMPANION_AUTH = tostring(var.enable_companion_auth)
+    
+    # Enhanced Handler Configuration
+    ENABLE_BEDROCK_FALLBACK = "true"
+    LEX_CONFIDENCE_THRESHOLD = "0.70"
+    SECURITY_EVENTS_TABLE = module.intent_table.name  # Reuse for security events
+    
+    # Logging
+    LOG_LEVEL = "INFO"
   }
 
   tags = var.tags
@@ -962,9 +1078,12 @@ data "aws_connect_hours_of_operation" "default" {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------------------------------
 # Connect Contact Flow
 # ---------------------------------------------------------------------------------------------------------------------
 # This defines the IVR/Chat experience
+
+# Main Lex Interaction Flow (kept for backward compatibility)
 resource "aws_connect_contact_flow" "main_flow" {
   instance_id = module.connect_instance.id
   name        = "MainIVRFlow"
@@ -982,6 +1101,63 @@ resource "aws_connect_contact_flow" "main_flow" {
   tags = var.tags
 
   depends_on = [null_resource.lex_bot_association]
+}
+
+# Voice IVR Flow with DTMF Menu
+# Temporarily commented out - flow validation failing
+# resource "aws_connect_contact_flow" "voice_ivr" {
+#   instance_id = module.connect_instance.id
+#   name        = "VoiceIVRFlow"
+#   description = "DTMF menu for voice routing"
+#   type        = "CONTACT_FLOW"
+#   content = templatefile("${path.module}/contact_flows/voice_ivr_simple.json.tftpl", {
+#     account_queue_arn        = aws_connect_queue.queues["AccountQueue"].arn
+#     lending_queue_arn        = aws_connect_queue.queues["LendingQueue"].arn
+#     general_queue_arn        = aws_connect_queue.queues["GeneralAgentQueue"].arn
+#     lex_interaction_flow_id  = aws_connect_contact_flow.main_flow.id
+#   })
+#   tags = var.tags
+# 
+#   depends_on = [
+#     aws_connect_queue.queues,
+#     aws_connect_contact_flow.main_flow
+#   ]
+# }
+
+# Voice Entry Flow with Hours Check
+resource "aws_connect_contact_flow" "voice_entry" {
+  instance_id = module.connect_instance.id
+  name        = "VoiceEntryFlow"
+  description = "Voice entry point"
+  type        = "CONTACT_FLOW"
+  content = templatefile("${path.module}/contact_flows/voice_entry_simple.json.tftpl", {
+    hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
+    general_queue_arn     = aws_connect_queue.queues["GeneralAgentQueue"].arn
+  })
+  tags = var.tags
+
+  depends_on = [
+    data.aws_connect_hours_of_operation.default,
+    aws_connect_queue.queues
+  ]
+}
+
+# Chat Entry Flow
+resource "aws_connect_contact_flow" "chat_entry" {
+  instance_id = module.connect_instance.id
+  name        = "ChatEntryFlow"
+  description = "Chat channel entry point"
+  type        = "CONTACT_FLOW"
+  content = templatefile("${path.module}/contact_flows/chat_entry_simple.json.tftpl", {
+    lex_bot_alias_arn     = awscc_lex_bot_alias.this.arn
+    general_queue_arn     = aws_connect_queue.queues["GeneralAgentQueue"].arn
+  })
+  tags = var.tags
+
+  depends_on = [
+    null_resource.lex_bot_association,
+    aws_connect_queue.queues
+  ]
 }
 
 

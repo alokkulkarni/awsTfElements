@@ -5,8 +5,8 @@ Includes balance checks, transaction history, statements, and account details.
 import logging
 from typing import Dict, Any
 from utils import close_dialog, elicit_slot
-from resilience import with_retry, circuit_breaker, TransientError, PermanentError
-import requests
+from handlers.resilience import with_retry, circuit_breaker, TransientError, PermanentError
+# import requests  # Commented out - using mock data for now
 import os
 
 logger = logging.getLogger(__name__)
@@ -33,42 +33,36 @@ def call_core_banking_api(endpoint: str, customer_id: str, params: Dict = None) 
         TransientError: Temporary failures (5xx, timeouts)
         PermanentError: Permanent failures (4xx, validation)
     """
-    url = f"{CORE_BANKING_API}{endpoint}"
-    headers = {
-        'Authorization': f'Bearer {API_KEY}',
-        'Content-Type': 'application/json',
-        'X-Customer-ID': customer_id
-    }
+    # Mock implementation - return sample data instead of calling external API
+    logger.info(f"Mock API call to {endpoint} for customer {customer_id}")
     
-    try:
-        response = requests.get(
-            url,
-            headers=headers,
-            params=params or {},
-            timeout=API_TIMEOUT
-        )
-        
-        # Handle different status codes
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code >= 500:
-            raise TransientError(f"API server error: {response.status_code}")
-        elif response.status_code == 404:
-            raise PermanentError(f"Resource not found: {endpoint}")
-        elif response.status_code == 401:
-            raise PermanentError("Authentication failed")
-        elif response.status_code >= 400:
-            raise PermanentError(f"Client error: {response.status_code}")
-        else:
-            raise TransientError(f"Unexpected status code: {response.status_code}")
-            
-    except requests.Timeout:
-        raise TransientError(f"API timeout after {API_TIMEOUT}s")
-    except requests.ConnectionError as e:
-        raise TransientError(f"Connection error: {str(e)}")
-    except Exception as e:
-        logger.error(f"Unexpected error calling API: {str(e)}", exc_info=True)
-        raise TransientError(f"API call failed: {str(e)}")
+    # Return mock data based on endpoint
+    if 'balance' in endpoint:
+        return {
+            'accountNumber': '****1234',
+            'availableBalance': 15420.50,
+            'currentBalance': 15670.50,
+            'currency': 'GBP'
+        }
+    elif 'transactions' in endpoint:
+        return {
+            'transactions': [
+                {'date': '2024-12-03', 'description': 'TESCO STORES', 'amount': -45.20},
+                {'date': '2024-12-02', 'description': 'Salary', 'amount': 3500.00},
+                {'date': '2024-12-01', 'description': 'AMAZON', 'amount': -89.99}
+            ]
+        }
+    elif 'statement' in endpoint:
+        return {'statementUrl': 'https://example.com/statement.pdf', 'period': 'November 2024'}
+    elif 'details' in endpoint:
+        return {
+            'accountNumber': '****1234',
+            'accountType': 'Current Account',
+            'sortCode': '12-34-56',
+            'openDate': '2020-01-15'
+        }
+    else:
+        return {'status': 'success', 'data': {}}
 
 
 def handle_check_balance(

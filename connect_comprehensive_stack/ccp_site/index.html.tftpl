@@ -162,10 +162,14 @@
                 allowFramedSoftphone: true,
                 disableRingtone: false
             },
+            chat: {
+                disableRingtone: false
+            },
             pageOptions: {
                 enableAudioDeviceSettings: true,
                 enablePhoneTypeSettings: true
-            }
+            },
+            ccpLoadTimeout: 10000 // 10 seconds
         });
 
         function handleLogin() {
@@ -208,11 +212,18 @@
 
         // Event: Contact Incoming/Connected
         connect.contact(function(contact) {
-            document.getElementById("status").innerText = "Contact Incoming/Connected";
+            const contactType = contact.getType();
+            console.log("Contact received - Type:", contactType);
+            document.getElementById("status").innerText = `Contact $${contactType}: $${contact.getStatus().type}`;
             updateAttributes(contact);
             
             contact.onRefresh(function(contact) {
                 updateAttributes(contact);
+            });
+
+            contact.onConnected(function() {
+                console.log("Contact connected:", contact.getContactId());
+                document.getElementById("status").innerText = `$${contactType} Connected`;
             });
 
             contact.onEnded(function() {
@@ -221,6 +232,15 @@
                 document.getElementById("sentiment-score").innerText = "Waiting for data...";
                 document.getElementById("lex-intent").innerText = "--";
             });
+
+            // Handle chat-specific events
+            if (contactType === connect.ContactType.CHAT) {
+                console.log("Chat contact detected");
+                const chatSession = contact.getAgentConnection();
+                if (chatSession) {
+                    console.log("Chat session available:", chatSession.getConnectionId());
+                }
+            }
         });
 
         function updateAttributes(contact) {

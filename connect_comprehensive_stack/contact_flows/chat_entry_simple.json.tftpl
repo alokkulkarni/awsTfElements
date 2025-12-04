@@ -1,0 +1,60 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "start-lex",
+  "Metadata": {
+    "entryPointPosition": {"x": 20, "y": 20},
+    "snapToGrid": false,
+    "name": "ChatEntryFlow",
+    "description": "Chat channel entry point",
+    "type": "contactFlow",
+    "status": "PUBLISHED"
+  },
+  "Actions": [
+    {
+      "Identifier": "start-lex",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "Text": "Hello! Welcome to our banking chat service. How can I help you today?",
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
+      },
+      "Transitions": {
+        "NextAction": "start-lex",
+        "Errors": [
+          {
+            "NextAction": "transfer-to-agent",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "transfer-to-agent",
+            "ErrorType": "NoMatchingError"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "transfer-to-agent",
+      "Type": "TransferToQueue",
+      "Parameters": {
+        "QueueId": "${general_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect-chat",
+        "Errors": [
+          {
+            "NextAction": "disconnect-chat",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "disconnect-chat",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

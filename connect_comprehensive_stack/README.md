@@ -44,4 +44,22 @@ Update `variables.tf` to customize:
 
 ## Architecture
 See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
+See [ROUTING_PROFILES.md](ROUTING_PROFILES.md) for routing profile configuration and differences.
+See [TRANSFER_GUIDE.md](TRANSFER_GUIDE.md) for transferring contacts between agents and routing profiles.
 See [CCP_INTEGRATION_GUIDE.md](CCP_INTEGRATION_GUIDE.md) for branding and CRM integration instructions.
+
+## Agent Credentials
+
+Two agents are pre-configured for testing:
+
+**Agent 1 (Basic Routing Profile):**
+- Username: `agent1`
+- Password: `Password123!`
+- Use for: Testing, training, chat functionality
+
+**Agent 2 (Main Routing Profile):**
+- Username: `agent2`
+- Password: `Password123!`
+- Use for: Advanced testing, high-volume tasks
+
+Login at the CCP URL output after deployment.

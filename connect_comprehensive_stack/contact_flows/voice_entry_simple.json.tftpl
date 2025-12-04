@@ -1,0 +1,58 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "play-welcome",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 20,
+      "y": 20
+    },
+    "snapToGrid": false,
+    "name": "VoiceEntryFlow",
+    "description": "Voice entry point",
+    "type": "contactFlow",
+    "status": "PUBLISHED",
+    "hash": {}
+  },
+  "Actions": [
+    {
+      "Identifier": "play-welcome",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for calling. Connecting you to an agent."
+      },
+      "Transitions": {
+        "NextAction": "transfer-to-queue",
+        "Errors": [
+          {
+            "NextAction": "transfer-to-queue",
+            "ErrorType": "NoMatchingError"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "transfer-to-queue",
+      "Type": "TransferToQueue",
+      "Parameters": {
+        "QueueId": "${general_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}
