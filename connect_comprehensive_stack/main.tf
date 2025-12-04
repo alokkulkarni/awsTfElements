@@ -423,8 +423,8 @@ resource "aws_lambda_permission" "lex_invoke" {
   statement_id  = "AllowLexInvoke"
   action        = "lambda:InvokeFunction"
   function_name = module.lex_fallback_lambda.function_name
-  principal     = "lex.amazonaws.com"
-  source_arn    = module.lex_bot.bot_arn
+  principal     = "lexv2.amazonaws.com"
+  source_arn    = "arn:aws:lex:${data.aws_caller_identity.current.id == data.aws_caller_identity.current.id ? "eu-west-2" : ""}:${data.aws_caller_identity.current.account_id}:bot-alias/${module.lex_bot.bot_id}/*"
 }
 
 # Build both bot locales before creating version

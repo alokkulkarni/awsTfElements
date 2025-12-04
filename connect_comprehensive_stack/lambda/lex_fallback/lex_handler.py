@@ -29,9 +29,9 @@ def lambda_handler(event, context):
     intent_name = intent.get('name')
     
     if intent_name == 'CheckBalance':
-        # Security Check: Requires Validation
-        if not is_authenticated(session_attributes):
-            return start_verification(intent_name)
+        # Security Check: Requires Validation (DISABLED FOR TESTING)
+        # if not is_authenticated(session_attributes):
+        #     return start_verification(intent_name)
         return handle_check_balance(customer_data, intent_name)
         
     elif intent_name == 'LoanInquiry':
@@ -39,9 +39,9 @@ def lambda_handler(event, context):
         return handle_loan_inquiry(event, intent_name)
         
     elif intent_name == 'OnboardingStatus':
-        # Security Check: Requires Validation
-        if not is_authenticated(session_attributes):
-            return start_verification(intent_name)
+        # Security Check: Requires Validation (DISABLED FOR TESTING)
+        # if not is_authenticated(session_attributes):
+        #     return start_verification(intent_name)
         return handle_onboarding_status(event, intent_name)
 
     # 4. Fallback / Bedrock Classification

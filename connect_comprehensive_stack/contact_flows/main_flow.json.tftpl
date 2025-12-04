@@ -5,7 +5,7 @@
     "entryPointPosition": { "x": 20, "y": 20 },
     "snapToGrid": false,
     "name": "MainIVRFlow",
-    "description": "Main flow with Lex integration and Agent Routing",
+    "description": "Main flow with Lex integration",
     "type": "contactFlow",
     "status": "PUBLISHED",
     "hash": {}
@@ -18,6 +18,17 @@
         "FlowLoggingBehavior": "Enabled"
       },
       "Transitions": {
+        "NextAction": "block-welcome",
+        "Errors": []
+      }
+    },
+    {
+      "Identifier": "block-welcome",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Welcome to Connect Comprehensive."
+      },
+      "Transitions": {
         "NextAction": "block-get-input",
         "Errors": []
       }
@@ -26,66 +37,25 @@
       "Identifier": "block-get-input",
       "Type": "ConnectParticipantWithLexBot",
       "Parameters": {
-        "Text": "Welcome to Connect Comprehensive. How can I help you today?",
+        "Text": "How can I help you today?",
         "LexV2Bot": {
           "AliasArn": "${lex_bot_alias_arn}"
         }
       },
       "Transitions": {
-        "NextAction": "block-disconnect",
+        "NextAction": "block-success",
         "Errors": [
           { "NextAction": "block-error-nomatch", "ErrorType": "NoMatchingCondition" },
           { "NextAction": "block-error-system", "ErrorType": "NoMatchingError" }
         ],
-        "Conditions": [
-          { "NextAction": "block-set-queue-account", "Condition": { "Operator": "Equals", "Operands": ["CheckBalance"] } },
-          { "NextAction": "block-set-queue-lending", "Condition": { "Operator": "Equals", "Operands": ["LoanInquiry"] } },
-          { "NextAction": "block-set-queue-onboarding", "Condition": { "Operator": "Equals", "Operands": ["OnboardingStatus"] } },
-          { "NextAction": "block-set-queue-general", "Condition": { "Operator": "Equals", "Operands": ["TransferToAgent"] } }
-        ]
+        "Conditions": []
       }
     },
     {
-      "Identifier": "block-set-queue-account",
-      "Type": "UpdateContactTargetQueue",
-      "Parameters": { "QueueId": "${account_queue_arn}" },
-      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
-    },
-    {
-      "Identifier": "block-set-queue-lending",
-      "Type": "UpdateContactTargetQueue",
-      "Parameters": { "QueueId": "${lending_queue_arn}" },
-      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
-    },
-    {
-      "Identifier": "block-set-queue-onboarding",
-      "Type": "UpdateContactTargetQueue",
-      "Parameters": { "QueueId": "${onboarding_queue_arn}" },
-      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
-    },
-    {
-      "Identifier": "block-set-queue-general",
-      "Type": "UpdateContactTargetQueue",
-      "Parameters": { "QueueId": "${general_queue_arn}" },
-      "Transitions": { "NextAction": "block-transfer", "Errors": [{ "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }] }
-    },
-    {
-      "Identifier": "block-transfer",
-      "Type": "TransferContactToQueue",
-      "Parameters": {},
-      "Transitions": {
-        "NextAction": "block-disconnect",
-        "Errors": [
-          { "NextAction": "block-error-msg", "ErrorType": "QueueAtCapacity" },
-          { "NextAction": "block-error-msg", "ErrorType": "NoMatchingError" }
-        ]
-      }
-    },
-    {
-      "Identifier": "block-error-msg",
+      "Identifier": "block-success",
       "Type": "MessageParticipant",
       "Parameters": {
-        "Text": "I'm sorry, I encountered an error or didn't understand. Please try again later."
+        "Text": "Thank you. Your request has been processed."
       },
       "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
     },
@@ -101,7 +71,7 @@
       "Identifier": "block-error-system",
       "Type": "MessageParticipant",
       "Parameters": {
-        "Text": "There was a system error connecting to the bot."
+        "Text": "There was a system error. Please try again later."
       },
       "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
     },
