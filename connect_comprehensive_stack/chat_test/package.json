@@ -1,0 +1,26 @@
+{
+  "name": "connect-chat-test",
+  "version": "1.0.0",
+  "description": "Amazon Connect Chat Test Interface",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "amazon-connect",
+    "chat",
+    "lex",
+    "aws"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "aws-sdk": "^2.1691.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}

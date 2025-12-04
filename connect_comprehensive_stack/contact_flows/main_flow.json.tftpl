@@ -5,7 +5,7 @@
     "entryPointPosition": { "x": 20, "y": 20 },
     "snapToGrid": false,
     "name": "MainIVRFlow",
-    "description": "Main flow with Lex integration",
+    "description": "Main flow with Lex integration and sequential retry logic",
     "type": "contactFlow",
     "status": "PUBLISHED",
     "hash": {}
@@ -29,12 +29,12 @@
         "Text": "Welcome to Connect Comprehensive."
       },
       "Transitions": {
-        "NextAction": "block-get-input",
+        "NextAction": "block-get-input-1",
         "Errors": []
       }
     },
     {
-      "Identifier": "block-get-input",
+      "Identifier": "block-get-input-1",
       "Type": "ConnectParticipantWithLexBot",
       "Parameters": {
         "Text": "How can I help you today?",
@@ -45,10 +45,101 @@
       "Transitions": {
         "NextAction": "block-success",
         "Errors": [
-          { "NextAction": "block-error-nomatch", "ErrorType": "NoMatchingCondition" },
-          { "NextAction": "block-error-system", "ErrorType": "NoMatchingError" }
+          { "NextAction": "block-error-nomatch-1", "ErrorType": "NoMatchingCondition" },
+          { "NextAction": "block-error-system-1", "ErrorType": "NoMatchingError" }
         ],
         "Conditions": []
+      }
+    },
+    {
+      "Identifier": "block-error-nomatch-1",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "I did not understand what you said. Please try again."
+      },
+      "Transitions": {
+        "NextAction": "block-get-input-2",
+        "Errors": []
+      }
+    },
+    {
+      "Identifier": "block-error-system-1",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "There was a system error. Please try again."
+      },
+      "Transitions": {
+        "NextAction": "block-get-input-2",
+        "Errors": []
+      }
+    },
+    {
+      "Identifier": "block-get-input-2",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "Text": "How can I help you today?",
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
+      },
+      "Transitions": {
+        "NextAction": "block-success",
+        "Errors": [
+          { "NextAction": "block-error-nomatch-2", "ErrorType": "NoMatchingCondition" },
+          { "NextAction": "block-error-system-2", "ErrorType": "NoMatchingError" }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "block-error-nomatch-2",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "I did not understand what you said. Please try again."
+      },
+      "Transitions": {
+        "NextAction": "block-get-input-3",
+        "Errors": []
+      }
+    },
+    {
+      "Identifier": "block-error-system-2",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "There was a system error. Please try again."
+      },
+      "Transitions": {
+        "NextAction": "block-get-input-3",
+        "Errors": []
+      }
+    },
+    {
+      "Identifier": "block-get-input-3",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "Text": "How can I help you today?",
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
+      },
+      "Transitions": {
+        "NextAction": "block-success",
+        "Errors": [
+          { "NextAction": "block-max-attempts", "ErrorType": "NoMatchingCondition" },
+          { "NextAction": "block-max-attempts", "ErrorType": "NoMatchingError" }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "block-max-attempts",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "I'm sorry, I'm still having trouble. Please try calling back later or contact support."
+      },
+      "Transitions": {
+        "NextAction": "block-disconnect",
+        "Errors": []
       }
     },
     {
@@ -56,22 +147,6 @@
       "Type": "MessageParticipant",
       "Parameters": {
         "Text": "Thank you. Your request has been processed."
-      },
-      "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
-    },
-    {
-      "Identifier": "block-error-nomatch",
-      "Type": "MessageParticipant",
-      "Parameters": {
-        "Text": "I did not understand what you said. Please try again."
-      },
-      "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
-    },
-    {
-      "Identifier": "block-error-system",
-      "Type": "MessageParticipant",
-      "Parameters": {
-        "Text": "There was a system error. Please try again later."
       },
       "Transitions": { "NextAction": "block-disconnect", "Errors": [] }
     },

@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amazon Connect Chat Test with Backend</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .config-section {
+            padding: 24px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .config-section h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: #555;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #f44336;
+            color: white;
+            margin-left: 8px;
+        }
+
+        .btn-secondary:hover {
+            background: #d32f2f;
+        }
+
+        .chat-section {
+            padding: 24px;
+            display: none;
+        }
+
+        .chat-section.active {
+            display: block;
+        }
+
+        .chat-window {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            height: 400px;
+            overflow-y: auto;
+            padding: 16px;
+            margin-bottom: 16px;
+            background: #f9f9f9;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.agent .message-bubble {
+            background: white;
+            color: #333;
+            border: 2px solid #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.system .message-bubble {
+            background: #fff3cd;
+            color: #856404;
+            border: 2px solid #ffc107;
+            max-width: 100%;
+            text-align: center;
+            margin: 0 auto;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .input-area {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-area input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .input-area input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+        }
+
+        .status.connecting {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 2px solid #bee5eb;
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            border: 2px solid #2196f3;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            color: #0d47a1;
+        }
+
+        .info-box strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .info-box code {
+            background: #bbdefb;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💬 Amazon Connect Chat Test</h1>
+            <p>Test chat with backend API proxy</p>
+        </div>
+
+        <div class="config-section">
+            <h2>⚙️ Configuration</h2>
+            
+            <div class="info-box">
+                <strong>ℹ️ Setup Instructions:</strong>
+                1. Start the backend server: <code>npm install && npm start</code><br>
+                2. Enter your Connect instance ID and contact flow ID below<br>
+                3. Click "Start Chat" to begin testing
+            </div>
+
+            <div class="form-group">
+                <label for="apiUrl">Backend API URL</label>
+                <input type="text" id="apiUrl" value="http://localhost:3000" placeholder="http://localhost:3000">
+            </div>
+
+            <div class="form-group">
+                <label for="instanceId">Connect Instance ID *</label>
+                <input type="text" id="instanceId" placeholder="6e728dc7-049b-46e6-addb-be0784cbb3ef" value="6e728dc7-049b-46e6-addb-be0784cbb3ef">
+            </div>
+
+            <div class="form-group">
+                <label for="contactFlowId">Contact Flow ID *</label>
+                <input type="text" id="contactFlowId" placeholder="efa7998c-4862-4f2e-9a7b-dde80a266dc7" value="efa7998c-4862-4f2e-9a7b-dde80a266dc7">
+            </div>
+
+            <div class="form-group">
+                <label for="customerName">Your Name</label>
+                <input type="text" id="customerName" placeholder="John Doe" value="Test User">
+            </div>
+
+            <button class="btn btn-primary" id="startChatBtn" onclick="startChat()">
+                Start Chat
+            </button>
+        </div>
+
+        <div class="chat-section" id="chatSection">
+            <div id="status" class="status disconnected">
+                Disconnected
+            </div>
+
+            <div class="chat-window" id="chatWindow">
+                <!-- Messages will appear here -->
+            </div>
+
+            <div class="input-area">
+                <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
+                <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+                <button class="btn btn-secondary" onclick="endChat()">End Chat</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chatSession = {
+            contactId: null,
+            participantId: null,
+            participantToken: null,
+            connectionToken: null,
+            websocket: null,
+            isConnected: false
+        };
+
+        let messagePollingInterval = null;
+
+        function updateStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        function addMessage(text, sender, time = new Date()) {
+            const chatWindow = document.getElementById('chatWindow');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            
+            const timeStr = time.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+            
+            messageDiv.innerHTML = `
+                <div class="message-bubble">
+                    ${escapeHtml(text)}
+                    <div class="message-time">${timeStr}</div>
+                </div>
+            `;
+            
+            chatWindow.appendChild(messageDiv);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function startChat() {
+            const apiUrl = document.getElementById('apiUrl').value.trim();
+            const instanceId = document.getElementById('instanceId').value.trim();
+            const contactFlowId = document.getElementById('contactFlowId').value.trim();
+            const customerName = document.getElementById('customerName').value.trim() || 'Anonymous';
+
+            if (!instanceId || !contactFlowId) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            const startChatBtn = document.getElementById('startChatBtn');
+            startChatBtn.disabled = true;
+            startChatBtn.textContent = 'Connecting...';
+            updateStatus('Connecting to Amazon Connect...', 'connecting');
+
+            try {
+                // Step 1: Start chat contact
+                console.log('Starting chat contact...');
+                const startResponse = await fetch(`${apiUrl}/api/start-chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        instanceId,
+                        contactFlowId,
+                        customerName
+                    })
+                });
+
+                if (!startResponse.ok) {
+                    const error = await startResponse.json();
+                    throw new Error(error.error || 'Failed to start chat');
+                }
+
+                const startData = await startResponse.json();
+                console.log('Chat started:', startData);
+
+                chatSession.contactId = startData.contactId;
+                chatSession.participantId = startData.participantId;
+                chatSession.participantToken = startData.participantToken;
+
+                // Step 2: Create participant connection
+                console.log('Creating participant connection...');
+                const connectionResponse = await fetch(`${apiUrl}/api/create-connection`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        participantToken: chatSession.participantToken
+                    })
+                });
+
+                if (!connectionResponse.ok) {
+                    const error = await connectionResponse.json();
+                    throw new Error(error.error || 'Failed to create connection');
+                }
+
+                const connectionData = await connectionResponse.json();
+                console.log('Connection created:', connectionData);
+
+                chatSession.connectionToken = connectionData.connectionCredentials.ConnectionToken;
+
+                // Step 3: Setup WebSocket connection
+                if (connectionData.websocket && connectionData.websocket.Url) {
+                    setupWebSocket(connectionData.websocket.Url);
+                } else {
+                    // Fallback to polling
+                    console.log('WebSocket not available, using polling...');
+                    startPolling();
+                }
+
+                chatSession.isConnected = true;
+
+                // Show chat section
+                document.getElementById('chatSection').classList.add('active');
+                updateStatus('✅ Connected - Chat session active', 'connected');
+                addMessage('Connected to Amazon Connect. How can we help you today?', 'system');
+                
+                startChatBtn.disabled = false;
+                startChatBtn.textContent = 'Start Chat';
+
+            } catch (error) {
+                console.error('Error starting chat:', error);
+                alert(`Failed to start chat: ${error.message}\n\nMake sure the backend server is running and AWS credentials are configured.`);
+                updateStatus('Failed to connect', 'disconnected');
+                startChatBtn.disabled = false;
+                startChatBtn.textContent = 'Start Chat';
+            }
+        }
+
+        function setupWebSocket(url) {
+            console.log('Setting up WebSocket connection...');
+            const ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket message:', data);
+                    
+                    if (data.Type === 'MESSAGE' || data.ContentType === 'text/plain') {
+                        if (data.ParticipantRole === 'AGENT' || data.ParticipantRole === 'SYSTEM') {
+                            const content = data.Content || data.Message;
+                            if (content) {
+                                addMessage(content, 'agent', new Date(data.AbsoluteTime));
+                            }
+                        }
+                    } else if (data.Type === 'EVENT') {
+                        if (data.ContentType === 'application/vnd.amazonaws.connect.event.chat.ended') {
+                            updateStatus('Chat ended by agent', 'disconnected');
+                            chatSession.isConnected = false;
+                            if (ws) ws.close();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing WebSocket message:', error);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                // Fallback to polling
+                startPolling();
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                if (chatSession.isConnected) {
+                    // Attempt to reconnect or fallback to polling
+                    startPolling();
+                }
+            };
+
+            chatSession.websocket = ws;
+        }
+
+        function startPolling() {
+            if (messagePollingInterval) {
+                clearInterval(messagePollingInterval);
+            }
+
+            let lastMessageId = null;
+
+            messagePollingInterval = setInterval(async () => {
+                if (!chatSession.isConnected || !chatSession.connectionToken) {
+                    return;
+                }
+
+                try {
+                    const apiUrl = document.getElementById('apiUrl').value.trim();
+                    const response = await fetch(`${apiUrl}/api/get-transcript`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            connectionToken: chatSession.connectionToken,
+                            maxResults: 15
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        
+                        if (data.transcript && data.transcript.length > 0) {
+                            // Process new messages
+                            data.transcript.forEach(item => {
+                                if (item.Id !== lastMessageId && 
+                                    (item.ParticipantRole === 'AGENT' || item.ParticipantRole === 'SYSTEM') &&
+                                    item.Type === 'MESSAGE') {
+                                    addMessage(item.Content, 'agent', new Date(item.AbsoluteTime));
+                                    lastMessageId = item.Id;
+                                }
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                }
+            }, 2000); // Poll every 2 seconds
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            if (!chatSession.isConnected || !chatSession.connectionToken) {
+                alert('Please start a chat session first');
+                return;
+            }
+
+            // Add user message to chat window
+            addMessage(message, 'user');
+            input.value = '';
+
+            // Send message through backend API
+            try {
+                const apiUrl = document.getElementById('apiUrl').value.trim();
+                const response = await fetch(`${apiUrl}/api/send-message`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        connectionToken: chatSession.connectionToken,
+                        message: message,
+                        contentType: 'text/plain'
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to send message');
+                }
+
+                console.log('Message sent successfully');
+            } catch (error) {
+                console.error('Error sending message:', error);
+                addMessage('❌ Failed to send message. Please try again.', 'system');
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        async function endChat() {
+            if (!chatSession.connectionToken) return;
+
+            try {
+                const apiUrl = document.getElementById('apiUrl').value.trim();
+                await fetch(`${apiUrl}/api/disconnect`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        connectionToken: chatSession.connectionToken
+                    })
+                });
+
+                chatSession.isConnected = false;
+                updateStatus('Chat ended', 'disconnected');
+                addMessage('You have ended the chat session.', 'system');
+
+                if (chatSession.websocket) {
+                    chatSession.websocket.close();
+                }
+
+                if (messagePollingInterval) {
+                    clearInterval(messagePollingInterval);
+                }
+
+                // Reset session
+                chatSession = {
+                    contactId: null,
+                    participantId: null,
+                    participantToken: null,
+                    connectionToken: null,
+                    websocket: null,
+                    isConnected: false
+                };
+            } catch (error) {
+                console.error('Error ending chat:', error);
+            }
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (chatSession.isConnected) {
+                endChat();
+            }
+        });
+    </script>
+</body>
+</html>
