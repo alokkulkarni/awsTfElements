@@ -337,12 +337,12 @@ module "bedrock_guardrail" {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Lambda for Lex Fallback (calls Bedrock)
+# Lambda for Bedrock MCP Integration (Primary Intent Classification and Tool Calling)
 # ---------------------------------------------------------------------------------------------------------------------
-data "archive_file" "lex_fallback_zip" {
+data "archive_file" "bedrock_mcp_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/${var.lex_fallback_lambda.source_dir}"
-  output_path = "${path.module}/lambda/lex_fallback.zip"
+  source_dir  = "${path.module}/${var.bedrock_mcp_lambda.source_dir}"
+  output_path = "${path.module}/lambda/bedrock_mcp.zip"
 }
 
 resource "aws_iam_role" "lambda_role" {
@@ -380,10 +380,14 @@ resource "aws_iam_role_policy" "lambda_policy" {
       },
       {
         Action = [
-          "bedrock:InvokeModel"
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
         ]
         Effect   = "Allow"
-        Resource = "*" # Scope to specific model ARN in production
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+        ]
       },
       {
         Action = [
@@ -407,49 +411,33 @@ resource "aws_iam_role_policy" "lambda_policy" {
   })
 }
 
-resource "aws_cloudwatch_log_group" "lex_fallback" {
-  name              = "/aws/lambda/${var.project_name}-lex-fallback"
+resource "aws_cloudwatch_log_group" "bedrock_mcp" {
+  name              = "/aws/lambda/${var.project_name}-bedrock-mcp"
   retention_in_days = 30
   tags              = var.tags
 }
 
-module "lex_fallback_lambda" {
+module "bedrock_mcp_lambda" {
   source        = "../resources/lambda"
-  filename      = data.archive_file.lex_fallback_zip.output_path
-  function_name = "${var.project_name}-lex-fallback"
+  filename      = data.archive_file.bedrock_mcp_zip.output_path
+  function_name = "${var.project_name}-bedrock-mcp"
   role_arn      = aws_iam_role.lambda_role.arn
-  handler       = "enhanced_lex_handler.lambda_handler"  # Updated to use enhanced handler
-  runtime       = var.lex_fallback_lambda.runtime
+  handler       = var.bedrock_mcp_lambda.handler
+  runtime       = var.bedrock_mcp_lambda.runtime
+  timeout       = var.bedrock_mcp_lambda.timeout
 
   environment_variables = {
-    # Core Tables
-    INTENT_TABLE_NAME     = module.intent_table.name
-    AUTH_STATE_TABLE_NAME = module.auth_state_table.name
-    
-    # API Configuration
-    CRM_API_ENDPOINT      = "${module.auth_api_gateway.api_endpoint}/customer"
-    CRM_API_KEY           = "secret-api-key-123"
-    CORE_BANKING_API_URL  = "https://api.banking.example.com/v1"  # Update with actual URL
-    FRAUD_ALERT_SNS_TOPIC = module.auth_sns_topic.topic_arn
-    
-    # Authentication Settings
-    SNS_TOPIC_ARN         = module.auth_sns_topic.topic_arn
-    ENABLE_VOICE_ID       = tostring(var.enable_voice_id)
-    ENABLE_PIN_VALIDATION = tostring(var.enable_pin_validation)
-    ENABLE_COMPANION_AUTH = tostring(var.enable_companion_auth)
-    
-    # Enhanced Handler Configuration
-    ENABLE_BEDROCK_FALLBACK = "true"
-    LEX_CONFIDENCE_THRESHOLD = "0.70"
-    SECURITY_EVENTS_TABLE = module.intent_table.name  # Reuse for security events
+    # Bedrock Configuration
+    BEDROCK_MODEL_ID     = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    AWS_REGION           = var.region
     
     # Logging
-    LOG_LEVEL = "INFO"
+    LOG_LEVEL            = "INFO"
   }
 
   tags = var.tags
 
-  depends_on = [aws_cloudwatch_log_group.lex_fallback]
+  depends_on = [aws_cloudwatch_log_group.bedrock_mcp]
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -459,7 +447,7 @@ module "lex_fallback_lambda" {
 module "lex_bot" {
   source                 = "../resources/lex"
   bot_name               = "${var.project_name}-bot"
-  fulfillment_lambda_arn = module.lex_fallback_lambda.arn
+  fulfillment_lambda_arn = module.bedrock_mcp_lambda.arn
   locale                 = var.locale
   voice_id               = var.voice_id
   tags                   = var.tags
@@ -538,7 +526,7 @@ resource "aws_lexv2models_intent" "intents_en_us" {
 resource "aws_lambda_permission" "lex_invoke" {
   statement_id  = "AllowLexInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = module.lex_fallback_lambda.function_name
+  function_name = module.bedrock_mcp_lambda.function_name
   principal     = "lexv2.amazonaws.com"
   source_arn    = "arn:aws:lex:${data.aws_caller_identity.current.id == data.aws_caller_identity.current.id ? "eu-west-2" : ""}:${data.aws_caller_identity.current.account_id}:bot-alias/${module.lex_bot.bot_id}/*"
 }
@@ -708,7 +696,7 @@ resource "awscc_lex_bot_alias" "this" {
         enabled = true
         code_hook_specification = {
           lambda_code_hook = {
-            lambda_arn = module.lex_fallback_lambda.arn
+            lambda_arn = module.bedrock_mcp_lambda.arn
             code_hook_interface_version = "1.0"
           }
         }
@@ -720,7 +708,7 @@ resource "awscc_lex_bot_alias" "this" {
         enabled = true
         code_hook_specification = {
           lambda_code_hook = {
-            lambda_arn = module.lex_fallback_lambda.arn
+            lambda_arn = module.bedrock_mcp_lambda.arn
             code_hook_interface_version = "1.0"
           }
         }

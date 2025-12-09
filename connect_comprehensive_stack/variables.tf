@@ -171,8 +171,8 @@ variable "lex_intents" {
   }
 }
 
-variable "lex_fallback_lambda" {
-  description = "Configuration for the Lex Fallback Lambda"
+variable "bedrock_mcp_lambda" {
+  description = "Configuration for the Bedrock MCP Lambda (Primary Intent Classification)"
   type = object({
     source_dir = string
     handler    = string
@@ -180,10 +180,26 @@ variable "lex_fallback_lambda" {
     timeout    = number
   })
   default = {
-    source_dir = "lambda/lex_fallback"
-    handler    = "lex_handler.lambda_handler"
+    source_dir = "lambda/bedrock_mcp"
+    handler    = "lambda_function.lambda_handler"
     runtime    = "python3.11"
-    timeout    = 30
+    timeout    = 60
+  }
+}
+
+variable "lex_fallback_lambda" {
+  description = "(Deprecated - Use bedrock_mcp_lambda) Configuration for the Lex Fallback Lambda"
+  type = object({
+    source_dir = string
+    handler    = string
+    runtime    = string
+    timeout    = number
+  })
+  default = {
+    source_dir = "lambda/bedrock_mcp"
+    handler    = "lambda_function.lambda_handler"
+    runtime    = "python3.11"
+    timeout    = 60
   }
 }
 
