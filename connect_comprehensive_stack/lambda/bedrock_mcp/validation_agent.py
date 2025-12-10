@@ -64,6 +64,20 @@ class ValidationAgent:
             validation_details["issues_found"].append(domain_check)
             validation_details["confidence_score"] *= 0.7
         
+        # Check for security violations (internal system disclosure)
+        security_check = self.check_security_violations(model_response)
+        validation_details["checks_performed"].append("security_violations")
+        if not security_check["passed"]:
+            validation_details["issues_found"].append(security_check)
+            validation_details["confidence_score"] *= 0.1  # Severe penalty for security violations
+        
+        # Check for customer data isolation violations
+        isolation_check = self.check_customer_isolation(user_query, model_response)
+        validation_details["checks_performed"].append("customer_isolation")
+        if not isolation_check["passed"]:
+            validation_details["issues_found"].append(isolation_check)
+            validation_details["confidence_score"] *= 0.1  # Severe penalty for data isolation violations
+        
         # Check document accuracy if tool results contain documents
         if tool_results and 'documents_required' in str(tool_results):
             doc_check = self.check_document_accuracy(tool_results, model_response)
@@ -80,10 +94,19 @@ class ValidationAgent:
                 validation_details["issues_found"].append(branch_check)
                 validation_details["confidence_score"] *= 0.6
         
-        # Determine severity
+        # Determine severity - security violations are always critical
+        security_violation_types = ["security_violations", "customer_isolation"]
+        has_security_violation = any(
+            issue.get("type") in security_violation_types 
+            for issue in validation_details["issues_found"]
+        )
+        
         if len(validation_details["issues_found"]) == 0:
             validation_details["severity"] = "none"
             is_valid = True
+        elif has_security_violation:
+            validation_details["severity"] = "critical"
+            is_valid = False
         elif validation_details["confidence_score"] < 0.3:
             validation_details["severity"] = "high"
             is_valid = False
@@ -169,6 +192,94 @@ class ValidationAgent:
             "passed": passed,
             "type": "domain_boundary",
             "details": off_topic_found if not passed else []
+        }
+    
+    def check_security_violations(self, model_response: str) -> Dict[str, Any]:
+        """Check for disclosure of internal system information or technical details."""
+        response_lower = model_response.lower()
+        
+        # Keywords that indicate internal system disclosure
+        internal_keywords = [
+            'system prompt', 'internal working', 'lambda function', 'bedrock', 'aws',
+            'configuration', 'prompt', 'tool definition', 'mcp server', 'validation agent',
+            'algorithm', 'model', 'claude', 'anthropic', 'api', 'database', 'dynamodb',
+            'cloudwatch', 'terraform', 'infrastructure', 'deployment', 'code', 'python',
+            'json', 'schema', 'endpoint', 'service', 'architecture', 'implementation'
+        ]
+        
+        # Phrases that indicate system disclosure attempts
+        disclosure_phrases = [
+            'how do you work', 'what are your instructions', 'show me your prompt',
+            'what tools do you have', 'how are you configured', 'what is your system',
+            'reveal your', 'tell me about your', 'explain your architecture',
+            'what model are you', 'how were you built', 'show me the code'
+        ]
+        
+        violations_found = []
+        
+        # Check for internal keywords
+        for keyword in internal_keywords:
+            if keyword in response_lower:
+                violations_found.append(f"Internal keyword: '{keyword}'")
+        
+        # Check for disclosure phrases
+        for phrase in disclosure_phrases:
+            if phrase in response_lower:
+                violations_found.append(f"Disclosure phrase: '{phrase}'")
+        
+        passed = len(violations_found) == 0
+        return {
+            "passed": passed,
+            "type": "security_violations",
+            "details": violations_found if not passed else []
+        }
+    
+    def check_customer_isolation(self, user_query: str, model_response: str) -> Dict[str, Any]:
+        """Check for references to other customers or unauthorized data."""
+        response_lower = model_response.lower()
+        query_lower = user_query.lower()
+        
+        # Indicators of customer data leakage
+        customer_leak_indicators = [
+            'other customer', 'another customer', 'previous customer', 'different customer',
+            'customer john', 'customer mary', 'customer smith', 'mr. ', 'mrs. ', 'ms. ',
+            'account number', 'sort code', 'balance of', 'transaction history',
+            'other account', 'different account', 'someone else', 'another person'
+        ]
+        
+        # Check if response mentions other customers or accounts
+        violations_found = []
+        for indicator in customer_leak_indicators:
+            if indicator in response_lower and indicator not in query_lower:
+                violations_found.append(f"Customer data reference: '{indicator}'")
+        
+        # Check for specific patterns that might indicate data leakage
+        import re
+        
+        # Account numbers (8 digits)
+        account_pattern = r'\b\d{8}\b'
+        if re.search(account_pattern, model_response):
+            violations_found.append("Potential account number disclosed")
+        
+        # Sort codes (XX-XX-XX format)
+        sort_code_pattern = r'\b\d{2}-\d{2}-\d{2}\b'
+        if re.search(sort_code_pattern, model_response):
+            violations_found.append("Potential sort code disclosed")
+        
+        # Names that weren't in the user query
+        name_pattern = r'\b[A-Z][a-z]+ [A-Z][a-z]+\b'
+        response_names = re.findall(name_pattern, model_response)
+        query_names = re.findall(name_pattern, user_query)
+        
+        for name in response_names:
+            if name not in query_names and name not in ['Account Opening', 'Debit Card', 'Customer Service']:
+                violations_found.append(f"Unauthorized name reference: '{name}'")
+        
+        passed = len(violations_found) == 0
+        return {
+            "passed": passed,
+            "type": "customer_isolation",
+            "details": violations_found if not passed else []
         }
     
     def check_document_accuracy(self, tool_results: Dict[str, Any], model_response: str) -> Dict[str, Any]:
@@ -312,6 +423,24 @@ class ValidationAgent:
                         'Dimensions': [
                             {'Name': 'Severity', 'Value': validation_details.get('severity', 'unknown')}
                         ]
+                    }
+                ]
+            )
+            
+            # Security violation detection
+            security_violation_types = ["security_violations", "customer_isolation"]
+            security_violation_detected = 1 if any(
+                issue.get("type") in security_violation_types 
+                for issue in validation_details.get("issues_found", [])
+            ) else 0
+            
+            cloudwatch.put_metric_data(
+                Namespace=namespace,
+                MetricData=[
+                    {
+                        'MetricName': 'SecurityViolationDetectionRate',
+                        'Value': security_violation_detected,
+                        'Unit': 'Count'
                     }
                 ]
             )
