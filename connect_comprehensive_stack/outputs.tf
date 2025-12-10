@@ -52,3 +52,13 @@ output "toll_free_phone_number" {
   description = "The claimed Toll-Free phone number"
   value       = aws_connect_phone_number.toll_free.phone_number
 }
+
+output "hallucination_logs_table_name" {
+  description = "The name of the DynamoDB table for hallucination logs"
+  value       = module.hallucination_logs_table.name
+}
+
+output "bedrock_primary_flow_id" {
+  description = "The ID of the Bedrock Primary contact flow"
+  value       = aws_connect_contact_flow.bedrock_primary.contact_flow_id
+}

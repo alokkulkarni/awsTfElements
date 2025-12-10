@@ -138,6 +138,23 @@ resource "aws_connect_instance_storage_config" "call_recordings" {
   }
 }
 
+resource "aws_connect_instance_storage_config" "contact_trace_records" {
+  instance_id   = module.connect_instance.id
+  resource_type = "CONTACT_TRACE_RECORDS"
+
+  storage_config {
+    s3_config {
+      bucket_name   = module.connect_storage_bucket.id
+      bucket_prefix = "contact-trace-records"
+      encryption_config {
+        encryption_type = "KMS"
+        key_id          = module.kms_key.arn
+      }
+    }
+    storage_type = "S3"
+  }
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Default Agent User
 # ---------------------------------------------------------------------------------------------------------------------
@@ -325,6 +342,114 @@ module "intent_table" {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
+# DynamoDB for Hallucination Logs
+# ---------------------------------------------------------------------------------------------------------------------
+module "hallucination_logs_table" {
+  source             = "../resources/dynamodb"
+  name               = "${var.project_name}-hallucination-logs"
+  hash_key           = "log_id"
+  range_key          = "timestamp"
+  ttl_enabled        = true
+  ttl_attribute_name = "ttl"
+  tags               = var.tags
+  
+  # Note: GSI not supported by module - can be added manually if needed for querying by hallucination_type
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# DynamoDB for Callback Requests
+# ---------------------------------------------------------------------------------------------------------------------
+module "callback_table" {
+  source             = "../resources/dynamodb"
+  name               = "${var.project_name}-callbacks"
+  hash_key           = "callback_id"
+  range_key          = "requested_at"
+  ttl_enabled        = true
+  ttl_attribute_name = "ttl"
+  tags               = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Callback Lambda Function
+# ---------------------------------------------------------------------------------------------------------------------
+data "archive_file" "callback_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/callback_handler"
+  output_path = "${path.module}/lambda/callback_handler.zip"
+}
+
+resource "aws_iam_role" "callback_lambda_role" {
+  name = "${var.project_name}-callback-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "callback_lambda_policy" {
+  name = "${var.project_name}-callback-lambda-policy"
+  role = aws_iam_role.callback_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Action = [
+          "dynamodb:PutItem"
+        ]
+        Effect   = "Allow"
+        Resource = module.callback_table.arn
+      }
+    ]
+  })
+}
+
+module "callback_lambda" {
+  source        = "../resources/lambda"
+  filename      = data.archive_file.callback_zip.output_path
+  function_name = "${var.project_name}-callback-handler"
+  role_arn      = aws_iam_role.callback_lambda_role.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 10
+
+  environment_variables = {
+    CALLBACK_TABLE_NAME = module.callback_table.name
+    AWS_REGION          = var.region
+    LOG_LEVEL           = "INFO"
+  }
+
+  tags = var.tags
+}
+
+# Permission for Connect to invoke callback Lambda
+resource "aws_lambda_permission" "connect_invoke_callback" {
+  statement_id  = "AllowConnectInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.callback_lambda.function_name
+  principal     = "connect.amazonaws.com"
+  source_arn    = module.connect_instance.arn
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Bedrock Guardrail
 # ---------------------------------------------------------------------------------------------------------------------
 module "bedrock_guardrail" {
@@ -397,8 +522,16 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Effect = "Allow"
         Resource = [
           module.intent_table.arn,
-          module.auth_state_table.arn
+          module.auth_state_table.arn,
+          module.hallucination_logs_table.arn
         ]
+      },
+      {
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
       },
       {
         Action = [
@@ -428,11 +561,15 @@ module "bedrock_mcp_lambda" {
 
   environment_variables = {
     # Bedrock Configuration
-    BEDROCK_MODEL_ID     = "anthropic.claude-3-5-sonnet-20241022-v2:0"
-    AWS_REGION           = var.region
+    BEDROCK_MODEL_ID                = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    AWS_REGION                      = var.region
     
     # Logging
-    LOG_LEVEL            = "INFO"
+    LOG_LEVEL                       = "INFO"
+    
+    # Hallucination Detection
+    ENABLE_HALLUCINATION_DETECTION  = "true"
+    HALLUCINATION_TABLE_NAME        = module.hallucination_logs_table.name
   }
 
   tags = var.tags
@@ -470,57 +607,16 @@ resource "aws_lexv2models_bot_locale" "en_us" {
   }
 }
 
-# Create intents in en_GB locale (from module)
-resource "aws_lexv2models_intent" "intents" {
-  for_each = var.lex_intents
-
-  bot_id      = module.lex_bot.bot_id
-  bot_version = "DRAFT"
-  locale_id   = module.lex_bot.locale_id
-  name        = each.key
-  description = each.value.description
-
-  dynamic "sample_utterance" {
-    for_each = each.value.utterances
-    content {
-      utterance = sample_utterance.value
-    }
-  }
-
-  dynamic "fulfillment_code_hook" {
-    for_each = each.value.fulfillment_enabled ? [1] : []
-    content {
-      enabled = true
-    }
-  }
-}
-
-# Create the same intents in en_US locale
-resource "aws_lexv2models_intent" "intents_en_us" {
-  for_each = var.lex_intents
-
-  bot_id      = module.lex_bot.bot_id
-  bot_version = "DRAFT"
-  locale_id   = aws_lexv2models_bot_locale.en_us.locale_id
-  name        = each.key
-  description = each.value.description
-
-  dynamic "sample_utterance" {
-    for_each = each.value.utterances
-    content {
-      utterance = sample_utterance.value
-    }
-  }
-
-  dynamic "fulfillment_code_hook" {
-    for_each = each.value.fulfillment_enabled ? [1] : []
-    content {
-      enabled = true
-    }
-  }
-
-  depends_on = [aws_lexv2models_bot_locale.en_us]
-}
+# Intents are no longer needed - using FallbackIntent only (created by module)
+# The Lex bot now uses a single FallbackIntent that passes all input to Bedrock via Lambda
+# resource "aws_lexv2models_intent" "intents" {
+#   for_each = var.lex_intents
+#   ...
+# }
+# resource "aws_lexv2models_intent" "intents_en_us" {
+#   for_each = var.lex_intents
+#   ...
+# }
 
 # Permission for Lex to invoke Lambda
 resource "aws_lambda_permission" "lex_invoke" {
@@ -535,9 +631,7 @@ resource "aws_lambda_permission" "lex_invoke" {
 resource "null_resource" "build_bot_locales" {
   triggers = {
     bot_id = module.lex_bot.bot_id
-    intents_hash = sha256(jsonencode([
-      for k, v in aws_lexv2models_intent.intents : k
-    ]))
+    # No intents_hash needed - using FallbackIntent only
   }
 
   provisioner "local-exec" {
@@ -621,8 +715,7 @@ resource "null_resource" "build_bot_locales" {
   }
 
   depends_on = [
-    aws_lexv2models_intent.intents,
-    aws_lexv2models_intent.intents_en_us
+    aws_lexv2models_bot_locale.en_us
   ]
 }
 
@@ -787,9 +880,9 @@ resource "null_resource" "validate_bot_alias" {
           exit 1
         fi
         
-        if [ "$LAMBDA_ARN" != "${module.lex_fallback_lambda.arn}" ]; then
+        if [ "$LAMBDA_ARN" != "${module.bedrock_mcp_lambda.arn}" ]; then
           echo "❌ Locale $LOCALE Lambda ARN mismatch"
-          echo "   Expected: ${module.lex_fallback_lambda.arn}"
+          echo "   Expected: ${module.bedrock_mcp_lambda.arn}"
           echo "   Found: $LAMBDA_ARN"
           exit 1
         fi
@@ -1071,25 +1164,20 @@ data "aws_connect_hours_of_operation" "default" {
 # ---------------------------------------------------------------------------------------------------------------------
 # This defines the IVR/Chat experience
 
-# Main Lex Interaction Flow (kept for backward compatibility)
-resource "aws_connect_contact_flow" "main_flow" {
-  instance_id = module.connect_instance.id
-  name        = "MainIVRFlow"
-  description = "Main flow with Lex integration and Agent Routing"
-  type        = "CONTACT_FLOW"
-  content = templatefile("${path.module}/${var.contact_flow_template_path}", {
-    lex_bot_name         = "${var.project_name}-bot"
-    lex_bot_alias_arn    = awscc_lex_bot_alias.this.arn
-    general_queue_arn    = aws_connect_queue.queues["GeneralAgentQueue"].arn
-    account_queue_arn    = aws_connect_queue.queues["AccountQueue"].arn
-    lending_queue_arn    = aws_connect_queue.queues["LendingQueue"].arn
-    onboarding_queue_arn = aws_connect_queue.queues["OnboardingQueue"].arn
-    locale               = var.locale
-  })
-  tags = var.tags
-
-  depends_on = [null_resource.lex_bot_association]
-}
+# Main Lex Interaction Flow - Deprecated in favor of bedrock_primary_flow
+# Commented out as main_flow.json.tftpl doesn't exist and is replaced by bedrock_primary_flow
+# resource "aws_connect_contact_flow" "main_flow" {
+#   instance_id = module.connect_instance.id
+#   name        = "MainIVRFlow"
+#   description = "Main flow with Lex integration and Agent Routing"
+#   type        = "CONTACT_FLOW"
+#   content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
+#     lex_bot_alias_arn     = awscc_lex_bot_alias.this.arn
+#     general_agent_queue_arn = aws_connect_queue.queues["GeneralAgentQueue"].arn
+#   })
+#   tags = var.tags
+#   depends_on = [null_resource.lex_bot_association]
+# }
 
 # Voice IVR Flow with DTMF Menu
 # Temporarily commented out - flow validation failing
@@ -1148,7 +1236,39 @@ resource "aws_connect_contact_flow" "chat_entry" {
   ]
 }
 
+# Bedrock Primary Flow - Simplified flow with input preservation and seamless handover
+resource "aws_connect_contact_flow" "bedrock_primary" {
+  instance_id = module.connect_instance.id
+  name        = "BedrockPrimaryFlow"
+  description = "Bedrock-primary architecture with input preservation and seamless agent handover"
+  type        = "CONTACT_FLOW"
+  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
+    lex_bot_alias_arn       = awscc_lex_bot_alias.this.arn
+    general_agent_queue_arn = aws_connect_queue.queues["GeneralAgentQueue"].arn
+  })
+  tags = var.tags
 
+  depends_on = [
+    awscc_lex_bot_alias.this,
+    aws_connect_queue.queues
+  ]
+}
+
+# Customer Queue Flow - Plays while customer waits with position updates and callback option
+resource "aws_connect_contact_flow" "customer_queue" {
+  instance_id = module.connect_instance.id
+  name        = "CustomerQueueFlow"
+  description = "Queue flow with position updates and callback option"
+  type        = "CUSTOMER_QUEUE"
+  content = templatefile("${path.module}/contact_flows/customer_queue_flow.json.tftpl", {
+    callback_lambda_arn = module.callback_lambda.arn
+  })
+  tags = var.tags
+
+  depends_on = [
+    module.callback_lambda
+  ]
+}
 
 # Associate Lex Bot with Connect Instance
 resource "null_resource" "lex_bot_association" {
@@ -1226,3 +1346,413 @@ resource "aws_cloudtrail" "main" {
   tags = var.tags
 }
 
+
+# ---------------------------------------------------------------------------------------------------------------------
+# SNS Topic for CloudWatch Alarms
+# ---------------------------------------------------------------------------------------------------------------------
+module "alarm_sns_topic" {
+  source     = "../resources/sns"
+  name       = "${var.project_name}-alarms"
+  kms_key_id = module.kms_key.key_id
+  tags       = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# CloudWatch Alarms for Hallucination Detection
+# ---------------------------------------------------------------------------------------------------------------------
+# High severity alarm: Hallucination detection rate > 10% over 5 minutes
+resource "aws_cloudwatch_metric_alarm" "hallucination_rate_high" {
+  alarm_name          = "${var.project_name}-hallucination-rate-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "HallucinationDetectionRate"
+  namespace           = "Connect/BedrockMCP"
+  period              = 300 # 5 minutes
+  statistic           = "Average"
+  threshold           = 10.0
+  alarm_description   = "Hallucination detection rate exceeded 10% over 5 minutes"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  tags = var.tags
+}
+
+# Medium severity alarm: Hallucination detection rate > 5% over 15 minutes
+resource "aws_cloudwatch_metric_alarm" "hallucination_rate_medium" {
+  alarm_name          = "${var.project_name}-hallucination-rate-medium"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "HallucinationDetectionRate"
+  namespace           = "Connect/BedrockMCP"
+  period              = 900 # 15 minutes
+  statistic           = "Average"
+  threshold           = 5.0
+  alarm_description   = "Hallucination detection rate exceeded 5% over 15 minutes"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  tags = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# CloudWatch Alarms for Error Rates
+# ---------------------------------------------------------------------------------------------------------------------
+# Lambda error rate alarm: > 5% over 5 minutes
+resource "aws_cloudwatch_metric_alarm" "lambda_error_rate" {
+  alarm_name          = "${var.project_name}-lambda-error-rate"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 5.0
+  alarm_description   = "Lambda error rate exceeded 5% over 5 minutes"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  metric_query {
+    id          = "error_rate"
+    expression  = "(errors / invocations) * 100"
+    label       = "Error Rate"
+    return_data = true
+  }
+
+  metric_query {
+    id = "errors"
+    metric {
+      metric_name = "Errors"
+      namespace   = "AWS/Lambda"
+      period      = 300 # 5 minutes
+      stat        = "Sum"
+      dimensions = {
+        FunctionName = module.bedrock_mcp_lambda.function_name
+      }
+    }
+  }
+
+  metric_query {
+    id = "invocations"
+    metric {
+      metric_name = "Invocations"
+      namespace   = "AWS/Lambda"
+      period      = 300 # 5 minutes
+      stat        = "Sum"
+      dimensions = {
+        FunctionName = module.bedrock_mcp_lambda.function_name
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+# Bedrock API errors alarm: > 10 errors per hour
+resource "aws_cloudwatch_metric_alarm" "bedrock_api_errors" {
+  alarm_name          = "${var.project_name}-bedrock-api-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "BedrockAPIErrors"
+  namespace           = "Connect/BedrockMCP"
+  period              = 3600 # 1 hour
+  statistic           = "Sum"
+  threshold           = 10
+  alarm_description   = "Bedrock API errors exceeded 10 per hour"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  tags = var.tags
+}
+
+# Validation timeout alarm: > 5 timeouts per hour
+resource "aws_cloudwatch_metric_alarm" "validation_timeouts" {
+  alarm_name          = "${var.project_name}-validation-timeouts"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ValidationTimeouts"
+  namespace           = "Connect/BedrockMCP"
+  period              = 3600 # 1 hour
+  statistic           = "Sum"
+  threshold           = 5
+  alarm_description   = "Validation timeouts exceeded 5 per hour"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  tags = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# CloudWatch Alarms for Queue Management
+# ---------------------------------------------------------------------------------------------------------------------
+# Queue size alarm: > 10 contacts in queue over 5 minutes
+resource "aws_cloudwatch_metric_alarm" "queue_size" {
+  alarm_name          = "${var.project_name}-queue-size-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "QueueSize"
+  namespace           = "AWS/Connect"
+  period              = 300 # 5 minutes
+  statistic           = "Average"
+  threshold           = 10
+  alarm_description   = "Queue size exceeded 10 contacts over 5 minutes"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    InstanceId = module.connect_instance.id
+    MetricGroup = "Queue"
+    QueueName   = "GeneralAgentQueue"
+  }
+
+  tags = var.tags
+}
+
+# Average wait time alarm: > 5 minutes
+resource "aws_cloudwatch_metric_alarm" "queue_wait_time" {
+  alarm_name          = "${var.project_name}-queue-wait-time-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "LongestQueueWaitTime"
+  namespace           = "AWS/Connect"
+  period              = 300 # 5 minutes
+  statistic           = "Maximum"
+  threshold           = 300 # 5 minutes in seconds
+  alarm_description   = "Queue wait time exceeded 5 minutes"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    InstanceId = module.connect_instance.id
+    MetricGroup = "Queue"
+    QueueName   = "GeneralAgentQueue"
+  }
+
+  tags = var.tags
+}
+
+# Queue abandonment rate alarm: > 20%
+resource "aws_cloudwatch_metric_alarm" "queue_abandonment_rate" {
+  alarm_name          = "${var.project_name}-queue-abandonment-rate-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 20.0
+  alarm_description   = "Queue abandonment rate exceeded 20%"
+  alarm_actions       = [module.alarm_sns_topic.topic_arn]
+  ok_actions          = [module.alarm_sns_topic.topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  metric_query {
+    id          = "abandonment_rate"
+    expression  = "(abandoned / (abandoned + handled)) * 100"
+    label       = "Abandonment Rate"
+    return_data = true
+  }
+
+  metric_query {
+    id = "abandoned"
+    metric {
+      metric_name = "ContactsAbandoned"
+      namespace   = "AWS/Connect"
+      period      = 300 # 5 minutes
+      stat        = "Sum"
+      dimensions = {
+        InstanceId  = module.connect_instance.id
+        MetricGroup = "Queue"
+        QueueName   = "GeneralAgentQueue"
+      }
+    }
+  }
+
+  metric_query {
+    id = "handled"
+    metric {
+      metric_name = "ContactsHandled"
+      namespace   = "AWS/Connect"
+      period      = 300 # 5 minutes
+      stat        = "Sum"
+      dimensions = {
+        InstanceId  = module.connect_instance.id
+        MetricGroup = "Queue"
+        QueueName   = "GeneralAgentQueue"
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# CloudWatch Dashboard for Monitoring
+# ---------------------------------------------------------------------------------------------------------------------
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "${var.project_name}-monitoring"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      # Hallucination Metrics Section
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["Connect/BedrockMCP", "HallucinationDetectionRate", { stat = "Average", label = "Detection Rate (%)" }],
+            [".", "ValidationSuccessRate", { stat = "Average", label = "Validation Success Rate (%)" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Hallucination Detection Metrics"
+          period  = 300
+          yAxis = {
+            left = {
+              min = 0
+              max = 100
+            }
+          }
+        }
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 0
+      },
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["Connect/BedrockMCP", "ValidationLatency", { stat = "Average", label = "Avg Latency (ms)" }],
+            ["...", { stat = "Maximum", label = "Max Latency (ms)" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Validation Latency"
+          period  = 300
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 0
+      },
+      # Conversation Metrics Section
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["Connect/BedrockMCP", "ConversationDuration", { stat = "Average", label = "Avg Duration (s)" }],
+            [".", "ConversationTurns", { stat = "Average", label = "Avg Turns" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Conversation Metrics"
+          period  = 300
+        }
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 6
+      },
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["Connect/BedrockMCP", "ToolInvocations", { stat = "Sum", label = "Tool Calls" }],
+            [".", "HandoverRate", { stat = "Average", label = "Handover Rate (%)" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Tool Usage & Handover Rate"
+          period  = 300
+        }
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 6
+      },
+      # Queue Metrics Section
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["AWS/Connect", "QueueSize", { stat = "Average", label = "Queue Size", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }],
+            [".", "LongestQueueWaitTime", { stat = "Maximum", label = "Max Wait Time (s)", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Queue Metrics"
+          period  = 300
+        }
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 12
+      },
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["AWS/Connect", "ContactsHandled", { stat = "Sum", label = "Handled", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }],
+            [".", "ContactsAbandoned", { stat = "Sum", label = "Abandoned", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Queue Contact Handling"
+          period  = 300
+        }
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 12
+      },
+      # Error Metrics Section
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["AWS/Lambda", "Errors", { stat = "Sum", label = "Lambda Errors", dimensions = { FunctionName = module.bedrock_mcp_lambda.function_name } }],
+            ["Connect/BedrockMCP", "BedrockAPIErrors", { stat = "Sum", label = "Bedrock API Errors" }],
+            [".", "ValidationTimeouts", { stat = "Sum", label = "Validation Timeouts" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Error Rates"
+          period  = 300
+        }
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 18
+      },
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["AWS/Lambda", "Duration", { stat = "Average", label = "Avg Duration (ms)", dimensions = { FunctionName = module.bedrock_mcp_lambda.function_name } }],
+            ["...", { stat = "Maximum", label = "Max Duration (ms)" }],
+            [".", "Invocations", { stat = "Sum", label = "Invocations" }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Lambda Performance"
+          period  = 300
+        }
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 18
+      }
+    ]
+  })
+}

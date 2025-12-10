@@ -1,0 +1,89 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "connect-to-lex",
+  "Metadata": {
+    "entryPointPosition": { "x": 20, "y": 20 },
+    "snapToGrid": false,
+    "name": "BedrockPrimaryFlow",
+    "description": "Bedrock-primary flow with input preservation and seamless agent handover",
+    "type": "contactFlow",
+    "status": "PUBLISHED"
+  },
+  "Actions": [
+    {
+      "Identifier": "connect-to-lex",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "Text": "Hello! Welcome to our banking service. I can help you with opening accounts and ordering debit cards. How can I assist you today?",
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
+      },
+      "Transitions": {
+        "NextAction": "check-intent",
+        "Errors": [
+          {
+            "NextAction": "error-handler",
+            "ErrorType": "NoMatchingError"
+          },
+          {
+            "NextAction": "error-handler",
+            "ErrorType": "NoMatchingCondition"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-intent",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "IntentName",
+        "ComparisonValue": "TransferToAgent"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Conditions": [
+          {
+            "NextAction": "transfer-to-agent",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["TransferToAgent"]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingCondition"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "error-handler",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Let me connect you with one of our specialists who can assist you. One moment please."
+      },
+      "Transitions": {
+        "NextAction": "transfer-to-agent"
+      }
+    },
+    {
+      "Identifier": "transfer-to-agent",
+      "Type": "TransferToQueue",
+      "Parameters": {
+        "QueueId": "${general_agent_queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": []
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    }
+  ]
+}

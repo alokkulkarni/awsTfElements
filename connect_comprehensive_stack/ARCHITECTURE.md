@@ -1,149 +1,239 @@
 # Connect Comprehensive Stack Architecture
 
-This document provides a detailed architectural overview of the **Connect Comprehensive Stack**, a production-ready Amazon Connect solution featuring advanced AI integration, tiered security validation, and a custom agent workspace.
+This document provides a detailed architectural overview of the **Connect Comprehensive Stack**, a production-ready Amazon Connect solution featuring Bedrock-primary conversational AI, intelligent tool calling with FastMCP 2.0, real-time hallucination detection, and seamless agent handover.
 
 ## 1. High-Level Architecture
 
-The solution leverages a **Hub-and-Spoke** architecture where Amazon Connect acts as the central communication hub, delegating logic to Amazon Lex and AWS Lambda, which in turn orchestrate services like Amazon Bedrock, DynamoDB, and internal validation logic.
+The solution leverages a **Bedrock-Primary** architecture where Amazon Connect acts as the central communication hub, with Amazon Lex serving as a simple pass-through to AWS Lambda. The Lambda function orchestrates Claude 3.5 Sonnet (via Amazon Bedrock) as the primary conversational AI engine, executing FastMCP 2.0 tools, validating responses for hallucinations, and managing intelligent agent handover.
 
 ### Architecture Diagram
 
 ```
-                                       +-----------------------------------------------------------------------+
-                                       |                       AWS Cloud (Zero Trust)                          |
-                                       |                                                                       |
-      +--------+                       |   +-------------------+       +-----------------------------------+   |
-      |        |   Voice / Chat        |   |                   |       |          Observability            |   |
-      |  User  +-------------------------->+   Amazon Connect  +------>+  CloudWatch Logs / Contact Lens   |   |
-      |        |                       |   |                   |       |  (Real-time Sentiment/Scribe)     |   |
-      +--------+                       |   +---------+---------+       +-----------------------------------+   |
-                                       |             |                                                         |
-                                       |             v                                                         |
-                                       |   +---------+---------+                                               |
-                                       |   |                   |                                               |
-                                       |   |   Contact Flow    |                                               |
-                                       |   |                   |                                               |
-                                       |   +----+-------+------+                                               |
-                                       |        |       |                                                      |
-                                       |        |       +----------------------------------+                   |
-                                       |        v                                          |                   |
-                                       |   +----+----+    Fallback (Unrecognized)    +-----+------+            |
-                                       |   |         +------------------------------>+            |            |
-                                       |   | Lex V2  |                               |   Lambda   |            |
-                                       |   |         +<------------------------------+ (Fallback) |            |
-                                       |   +---------+      Delegate (Recognized)    +-----+------+            |
-                                       |                                                   |                   |
-                                       |                                                   v                   |
-                                       |                                         +---------+---------+         |
-                                       |                                         |                   |         |
-                                       |                                         |  Amazon Bedrock   |         |
-                                       |                                         | (Classification)  |         |
-                                       |                                         |                   |         |
-                                       |                                         +---------+---------+         |
-                                       |                                                   |                   |
-                                       |                                                   v                   |
-                                       |                                         +---------+---------+         |
-                                       |                                         | Bedrock Guardrail |         |
-                                       |                                         | (Content Mod.)    |         |
-                                       |                                         +-------------------+         |
-                                       |                                                                       |
-                                       |                                                                       |
-                                       |   +-------------------+       +-----------------------------------+   |
-                                       |   |                   |       |                                   |   |
-                                       |   |    Agent Queue    |<------+      DynamoDB (New Intents)       |   |
-                                       |   |                   |       |                                   |   |
-                                       |   +---------+---------+       +-----------------------------------+   |
-                                       |             |                                                         |
-                                       |             v                                                         |
-      +--------+                       |   +---------+---------+       +-----------------------------------+   |
-      |        |   HTTPS (WAF)         |   |                   |       |                                   |   |
-      | Agent  +<--------------------------+   Human Agent     |       |    S3 (Recordings/Transcripts)    |   |
-      |        |   Custom CCP          |   |                   |       |          (KMS Encrypted)          |   |
-      +--------+                       |   +-------------------+       +-----------------------------------+   |
-                                       |                                                                       |
-```
-      +--------+                       |   +-------------------+       +-----------------------------------+   |
-      | Mobile |   Push Notification   |   |                   |       |                                   |   |
-      |  App   +<--------------------------+        SNS        |<------+      DynamoDB (Auth State)        |   |
-      |        |                       |   |                   |       |                                   |   |
-      |        +-------------------------->+    API Gateway    +------>+        Lambda (Auth API)          |   |
-      +--------+      HTTPS (API)      |   +-------------------+       +-----------------------------------+   |
-                                       |                                                                       |
-                                       |   +-------------------+       +-----------------------------------+   |
-                                       |   |                   |       |                                   |   |
-                                       |   |    CRM API        |<------+        Lambda (CRM Mock)          |   |
-                                       |   |                   |       |                                   |   |
-                                       |   +---------+---------+       +-----------------------------------+   |
-                                       |             ^                                                         |
-                                       |             | (HTTPS / x-api-key)                                     |
-                                       |             |                                                         |
-                                       |   +---------+---------+                                               |
-                                       |   |                   |                                               |
-                                       |   |  Lambda (Main)    |                                               |
-                                       |   |                   |                                               |
-                                       |   +-------------------+                                               |
-                                       +-----------------------------------------------------------------------+
+                                       +-------------------------------------------------------------------------+
+                                       |                       AWS Cloud (Zero Trust)                            |
+                                       |                                                                         |
+      +--------+                       |   +-------------------+       +-------------------------------------+   |
+      |        |   Voice / Chat        |   |                   |       |          Observability              |   |
+      |  User  +-------------------------->+   Amazon Connect  +------>+  CloudWatch Logs / Contact Lens     |   |
+      |        |                       |   |                   |       |  CloudWatch Dashboard & Alarms      |   |
+      +--------+                       |   +---------+---------+       +-------------------------------------+   |
+                                       |             |                                                           |
+                                       |             v                                                           |
+                                       |   +---------+---------+                                                 |
+                                       |   |                   |                                                 |
+                                       |   |   Contact Flow    |                                                 |
+                                       |   | (Bedrock Primary) |                                                 |
+                                       |   +----+-------+------+                                                 |
+                                       |        |       |                                                        |
+                                       |        v       +---> (Error) --> Agent Queue                            |
+                                       |   +----+----+                                                           |
+                                       |   |         |   ALL Input (FallbackIntent)                              |
+                                       |   | Lex V2  +------------------------------------------------+          |
+                                       |   | (Pass-  |                                                |          |
+                                       |   | through)|                                                |          |
+                                       |   +---------+                                                |          |
+                                       |                                                              v          |
+                                       |                                                    +---------+-------+  |
+                                       |                                                    |                 |  |
+                                       |                                                    | Bedrock MCP     |  |
+                                       |                                                    | Lambda          |  |
+                                       |                                                    | (Primary)       |  |
+                                       |                                                    +--------+--------+  |
+                                       |                                                             |           |
+                                       |                    +----------------------------------------+           |
+                                       |                    |                                                    |
+                                       |                    v                                                    |
+                                       |          +---------+---------+                                          |
+                                       |          |                   |                                          |
+                                       |          |  Amazon Bedrock   |                                          |
+                                       |          | Claude 3.5 Sonnet |                                          |
+                                       |          | (Conversational   |                                          |
+                                       |          |  AI + Tools)      |                                          |
+                                       |          +---------+---------+                                          |
+                                       |                    |                                                    |
+                                       |       +------------+-------------+                                      |
+                                       |       |                          |                                      |
+                                       |       v                          v                                      |
+                                       | +-----+------+          +--------+--------+                             |
+                                       | |  FastMCP   |          | Validation      |                             |
+                                       | |  2.0 Tools |          | Agent           |                             |
+                                       | |            |          | (Hallucination  |                             |
+                                       | | - Account  |          |  Detection)     |                             |
+                                       | | - Cards    |          +--------+--------+                             |
+                                       | | - Branch   |                   |                                      |
+                                       | +-----+------+                   v                                      |
+                                       |       |              +-----------+-----------+                          |
+                                       |       |              |  DynamoDB             |                          |
+                                       |       |              |  (Hallucination Logs) |                          |
+                                       |       |              +-----------------------+                          |
+                                       |       |                                                                 |
+                                       |       v                                                                 |
+                                       | +-----+------+                                                          |
+                                       | | Handover   |                                                          |
+                                       | | Detection  |                                                          |
+                                       | +-----+------+                                                          |
+                                       |       |                                                                 |
+                                       |       v (TransferToAgent)                                               |
+                                       |   +---+---------------+       +-------------------------------------+   |
+                                       |   |                   |       |                                     |   |
+                                       |   |    Agent Queue    |       |  Customer Queue Flow                |   |
+                                       |   | (GeneralAgent)    |<------+  - Position Updates                 |   |
+                                       |   |                   |       |  - Callback Option                  |   |
+                                       |   +---------+---------+       +-------------------------------------+   |
+                                       |             |                                                           |
+                                       |             v                                                           |
+      +--------+                       |   +---------+---------+       +-------------------------------------+   |
+      |        |   HTTPS (WAF)         |   |                   |       |                                     |   |
+      | Agent  +<--------------------------+   Human Agent     |       |    S3 (Recordings/Transcripts/CTR)  |   |
+      |        |   Custom CCP          |   |                   |       |          (KMS Encrypted)            |   |
+      +--------+                       |   +-------------------+       +-------------------------------------+   |
+                                       |                                                                         |
+                                       |   +-------------------+       +-------------------------------------+   |
+                                       |   |                   |       |                                     |   |
+                                       |   |  CloudWatch       |<------+  SNS (Alarm Notifications)         |   |
+                                       |   |  Alarms           |       |                                     |   |
+                                       |   +-------------------+       +-------------------------------------+   |
+                                       |                                                                         |
+                                       +-------------------------------------------------------------------------+
 ```
 
 ### Data Flow Description
 
 1.  **Ingestion**: User interacts via Voice or Chat. Amazon Connect handles the session.
-2.  **Orchestration**: Connect invokes the Contact Flow.
-3.  **Understanding**: Lex V2 interprets the user's intent.
-4.  **Fulfillment**:
-    *   **Known Intent**: Lex invokes Lambda. Lambda checks security (Validation Module) and executes business logic (Fulfillment Module).
-    *   **Unknown Intent**: Lex invokes Lambda (Fallback). Lambda calls Bedrock to classify the text.
-5.  **Data Lookup**: Lambda calls the **CRM API** (Internal Microservice) via API Gateway to fetch customer details securely using an API Key.
-6.  **Authentication (Companion App)**:
-    *   **Initiation**: Lambda publishes a message to **SNS**, which sends a push notification to the user's mobile app.
-    *   **State Tracking**: Lambda creates a `PENDING` record in **DynamoDB (Auth State)**.
-    *   **Approval**: User approves in the app. App calls **API Gateway**, which triggers **Lambda (Auth API)** to update the record to `APPROVED`.
-    *   **Verification**: The main Lambda polls **DynamoDB** to confirm the approval.
-7.  **Safety**: Bedrock Guardrails filter inappropriate content before it reaches the user.
-8.  **Agent Routing**: If escalation is needed, Connect routes the call to the appropriate queue.
-9.  **Agent Access**: Agents access the system via a secure, WAF-protected Custom CCP hosted on S3/CloudFront.
+2.  **Orchestration**: Connect invokes the Bedrock Primary Contact Flow.
+3.  **Pass-through**: Lex V2 receives ALL user input via FallbackIntent and immediately passes it to Lambda.
+4.  **Primary Fulfillment**:
+    *   Lambda extracts user input and conversation history from Lex event
+    *   Lambda invokes Claude 3.5 Sonnet with:
+        *   System prompt (banking service agent for account opening and debit cards)
+        *   Conversation history for context
+        *   FastMCP 2.0 tool definitions
+    *   Bedrock processes the request and either:
+        *   Returns a direct text response, OR
+        *   Requests tool execution (tool_use)
+5.  **Tool Execution**: When Bedrock requests tools:
+    *   Lambda executes the requested FastMCP 2.0 tool:
+        *   `get_branch_account_opening_info`: Branch account opening process and documents
+        *   `get_digital_account_opening_info`: Digital account opening process and documents
+        *   `get_debit_card_info`: Debit card types, features, and ordering
+        *   `find_nearest_branch`: Location-based branch finder
+    *   Tool results are sent back to Bedrock for response composition
+6.  **Validation**: ValidationAgent checks the response for hallucinations:
+    *   Compares response facts against tool results
+    *   Checks domain boundaries
+    *   Validates document and branch accuracy
+    *   Logs hallucinations to DynamoDB with severity levels
+    *   Publishes metrics to CloudWatch
+    *   Takes action based on severity (regenerate or safe fallback)
+7.  **Handover Detection**: Lambda analyzes conversation for handover triggers:
+    *   Explicit agent requests ("I need an agent")
+    *   Frustration indicators ("this is useless")
+    *   Repeated queries (same intent 3+ times)
+    *   Capability limitations
+    *   Tool failures exceeding threshold
+8.  **Agent Handover**: When handover is needed:
+    *   Lambda formats conversation summary and context
+    *   Returns TransferToAgent intent to Lex
+    *   Contact Flow routes to GeneralAgentQueue
+    *   Customer Queue Flow manages wait with position updates and callback option
+9.  **Monitoring**: CloudWatch tracks:
+    *   Hallucination detection rates
+    *   Conversation metrics (duration, turns, tool usage)
+    *   Queue metrics (size, wait times, abandonment)
+    *   Error rates and Lambda performance
+10. **Audit Trail**: All interactions logged to:
+    *   CloudWatch Logs (structured logging)
+    *   S3 (chat transcripts, call recordings, contact trace records)
+    *   DynamoDB (hallucination logs, callback requests)
+    *   CloudTrail (API access auditing)
 
 ---
 
 ## 2. Component Deep Dive
 
-### 2.1 Amazon Connect (The Core)
+### 2.1 Amazon Connect (The Hub)
 *   **Role**: Entry point for all voice and chat interactions.
 *   **Key Features**:
-    *   **Contact Flows**: Defines the customer journey (IVR).
-    *   **Contact Lens**: Real-time sentiment analysis and transcription.
-    *   **Voice ID**: (Optional) Passive biometric authentication.
-    *   **Queues**: Routing logic for `General`, `Account`, `Lending`, and `Onboarding` queues.
+    *   **Bedrock Primary Contact Flow**: Simplified flow that greets users and passes control to Lex
+    *   **Customer Queue Flow**: Manages wait experience with position updates and callback options
+    *   **Contact Lens**: Real-time sentiment analysis and transcription
+    *   **Queues**: GeneralAgentQueue for agent handover
+    *   **Storage**: S3 storage for chat transcripts, call recordings, and contact trace records
 
-### 2.2 Amazon Lex V2 (The Ear)
-*   **Role**: Natural Language Understanding (NLU).
-*   **Intents**:
-    *   `CheckBalance`: Sensitive intent (Requires Authentication).
-    *   `LoanInquiry`: Public intent (No Auth required).
-    *   `OnboardingStatus`: Sensitive intent (Requires Authentication).
-    *   `VerifyIdentity`: Helper intent for PIN collection.
-    *   `TransferToAgent`: Explicit handover.
-    *   `FallbackIntent`: Catch-all for unrecognized input.
+### 2.2 Amazon Lex V2 (The Pass-Through)
+*   **Role**: Simple pass-through layer that forwards all input to Lambda.
+*   **Configuration**:
+    *   **Single Intent**: FallbackIntent only (no complex intent definitions)
+    *   **Two Locales**: en_GB (primary) and en_US (for Connect compatibility)
+    *   **Lambda Integration**: All input immediately forwarded to Bedrock MCP Lambda
+    *   **Conversation History**: Maintains session attributes for context preservation
+*   **Simplified Architecture**: Lex no longer performs NLU; it simply acts as a connector between Connect and Lambda
 
-### 2.3 Modular Lambda Fulfillment (The Brain)
-The fulfillment logic is centralized in a single Lambda function but **modularized** for maintainability and performance.
+### 2.3 Bedrock MCP Lambda (The Brain)
+The primary fulfillment Lambda function that orchestrates the entire conversational AI experience.
 
-*   **Path**: `connect_comprehensive_stack/lambda/lex_fallback/`
+*   **Path**: `connect_comprehensive_stack/lambda/bedrock_mcp/`
 *   **Structure**:
-    *   `lambda_function.py`: **Entry Point**. Handles event routing, session state management, and orchestrates the flow between validation and fulfillment.
-    *   `validation.py`: **Security Layer**.
-        *   **Identification**: Passive lookup of ANI (Phone Number) against `MOCK_DATA`.
-        *   **Tier 1 (Biometric)**: Checks `VoiceIdStatus` (if `ENABLE_VOICE_ID` is true).
-        *   **Tier 2 (Knowledge)**: Challenges user for a PIN (if `ENABLE_PIN_VALIDATION` is true).
-    *   `fulfillment.py`: **Business Logic**. Contains specific handlers for `CheckBalance`, `LoanInquiry`, etc.
-    *   `utils.py`: **Helpers**. Standardized Lex response builders (`close`, `delegate`, `elicit_slot`) and logging.
+    *   `lambda_function.py`: **Main orchestrator**
+        *   Extracts user input and conversation history from Lex event
+        *   Invokes Claude 3.5 Sonnet with system prompt and tools
+        *   Handles tool_use responses by executing FastMCP 2.0 tools
+        *   Manages conversation history serialization
+        *   Detects handover needs and initiates agent transfer
+        *   Formats responses for Lex delivery
+    *   `validation_agent.py`: **Hallucination detection**
+        *   ValidationAgent class with comprehensive validation methods
+        *   Detects fabricated data not present in tool results
+        *   Checks domain boundaries and document accuracy
+        *   Logs hallucinations to DynamoDB with severity levels
+        *   Publishes CloudWatch metrics
+        *   Implements severity-based response strategies
 
-### 2.4 Amazon Bedrock (The Safety Net)
-*   **Role**: Intelligent Fallback and Guardrails.
-*   **Flow**: When Lex triggers `FallbackIntent`, the Lambda calls Bedrock to classify the utterance.
-    *   If it matches a known intent (but Lex missed it), it re-routes.
-    *   If it's a completely new intent, it logs it to **DynamoDB** for analysis.
-*   **Guardrails**: Filters out harmful, PII, or off-topic content (e.g., financial advice restrictions).
+*   **FastMCP 2.0 Tools**:
+    *   `get_branch_account_opening_info(account_type)`: Returns branch account opening process and required documents
+    *   `get_digital_account_opening_info(account_type)`: Returns digital account opening process and required documents
+    *   `get_debit_card_info(card_type)`: Returns debit card information, features, and ordering process
+    *   `find_nearest_branch(location)`: Returns nearest branch with address, hours, and services
+
+*   **Handover Detection Logic**:
+    *   Explicit agent requests (keywords: "agent", "human", "person")
+    *   Frustration detection (keywords: "frustrated", "annoyed", "useless")
+    *   Repeated query detection (same intent 3+ times)
+    *   Capability limitation detection from Bedrock response
+    *   Tool failure counting with threshold checking
+
+### 2.4 Amazon Bedrock (The Conversational AI Engine)
+*   **Role**: Primary conversational AI using Claude 3.5 Sonnet.
+*   **Model**: `anthropic.claude-3-5-sonnet-20241022-v2:0`
+*   **Capabilities**:
+    *   Natural language understanding and generation
+    *   Tool calling with FastMCP 2.0 integration
+    *   Multi-turn conversation with context awareness
+    *   Banking domain expertise via system prompt
+*   **System Prompt**: Configured as a banking service agent specializing in:
+    *   Account opening processes (branch and digital)
+    *   Debit card information and ordering
+    *   Branch location services
+    *   Natural, helpful conversation style
+
+### 2.5 Validation Agent (The Safety Net)
+*   **Role**: Real-time hallucination detection and prevention.
+*   **Detection Methods**:
+    *   **Fabricated Data**: Compares response facts against tool results
+    *   **Domain Boundaries**: Ensures responses stay within banking topics
+    *   **Document Accuracy**: Validates document requirements match tool data
+    *   **Branch Accuracy**: Verifies branch information is correct
+*   **Response Strategies**:
+    *   **High Severity**: Safe fallback message, no regeneration
+    *   **Medium Severity**: Regenerate with stricter constraints
+    *   **Low Severity**: Log and continue
+*   **Logging**: DynamoDB table with 90-day TTL containing:
+    *   log_id, timestamp, user_query, tool_results, model_response
+    *   hallucination_type, severity, validation_details, action_taken
+*   **Metrics**: CloudWatch metrics for monitoring:
+    *   HallucinationDetectionRate
+    *   ValidationSuccessRate
+    *   ValidationLatency
 
 ### 2.5 Custom Agent Workspace (CCP)
 *   **Role**: Secure interface for agents.
@@ -157,172 +247,150 @@ The fulfillment logic is centralized in a single Lambda function but **modulariz
 
 ## 3. User Journey Flows
 
-### 3.1 Secure Transaction (Check Balance)
+### 3.1 Simple Query with Tool Execution
 
-This flow demonstrates the tiered security model. The user attempts to access sensitive information (`CheckBalance`), triggering an authentication challenge.
+This flow demonstrates a basic account opening inquiry that requires tool execution.
 
 ```
-User                Lex V2              Lambda (Router)     Lambda (Validation)
+User                Lex V2              Lambda              Bedrock             FastMCP Tool
+ |                    |                    |                    |                    |
+ | "How do I open     |                    |                    |                    |
+ |  a checking        |                    |                    |                    |
+ |  account?"         |                    |                    |                    |
+ |------------------->|                    |                    |                    |
+ |                    | FallbackIntent     |                    |                    |
+ |                    |------------------->|                    |                    |
+ |                    |                    | Invoke with        |                    |
+ |                    |                    | system prompt      |                    |
+ |                    |                    | + tools            |                    |
+ |                    |                    |------------------->|                    |
+ |                    |                    |                    | tool_use:          |
+ |                    |                    |                    | get_branch_        |
+ |                    |                    |                    | account_opening    |
+ |                    |                    |<-------------------|                    |
+ |                    |                    | Execute tool       |                    |
+ |                    |                    |----------------------------------->|
+ |                    |                    |                    |                    | Return docs
+ |                    |                    |<-----------------------------------|
+ |                    |                    | Send tool result   |                    |
+ |                    |                    |------------------->|                    |
+ |                    |                    |                    | Compose response   |
+ |                    |                    |<-------------------|                    |
+ |                    |                    | Validate response  |                    |
+ |                    |                    | (No hallucination) |                    |
+ |                    | Response: "To open |                    |                    |
+ |                    | a checking account |                    |                    |
+ |                    | at a branch..."    |                    |                    |
+ |<-------------------|--------------------|                    |                    |
+```
+
+### 3.2 Multi-turn Conversation with Context
+
+This flow demonstrates conversation history management across multiple turns.
+
+```
+User                Lex V2              Lambda              Bedrock
  |                    |                    |                    |
- | "Check Balance"    |                    |                    |
+ | "What debit cards  |                    |                    |
+ |  do you offer?"    |                    |                    |
  |------------------->|                    |                    |
- |                    | Intent: CheckBal   |                    |
+ |                    | FallbackIntent     |                    |
  |                    |------------------->|                    |
- |                    |                    | Check Auth?        |
+ |                    |                    | Invoke + tool      |
  |                    |                    |------------------->|
- |                    |                    |                    | No (False)
- |                    |                    |<-------------------|
- |                    | Elicit Slot: PIN   |                    |
+ |                    | Response: "We      |                    |
+ |                    | offer Classic..."  |                    |
  |<-------------------|--------------------|                    |
- | "1234"             |                    |                    |
+ |                    |                    |                    |
+ | "Which one has     |                    |                    |
+ |  cashback?"        |                    |                    |
  |------------------->|                    |                    |
- |                    | Intent: VerifyID   |                    |
- |                    | Slot: PIN=1234     |                    |
+ |                    | FallbackIntent     |                    |
+ |                    | + history          |                    |
  |                    |------------------->|                    |
- |                    |                    | Validate PIN       |
+ |                    |                    | Invoke with        |
+ |                    |                    | conversation       |
+ |                    |                    | history            |
  |                    |                    |------------------->|
- |                    |                    |                    | Yes (True)
- |                    |                    |<-------------------|
- |                    | Delegate: CheckBal |                    |
- |<-------------------|--------------------|                    |
- |                    |                    |                    |
- |                    | Intent: CheckBal   |                    |
- |                    |------------------->|                    |
- |                    |                    | Check Auth?        |
- |                    |                    |------------------->|
- |                    |                    |                    | Yes (True)
- |                    |                    |<-------------------|
- |                    | Fulfill: Balance   |                    |
+ |                    |                    |                    | (Uses context)
+ |                    | Response: "The     |                    |
+ |                    | Premium card..."   |                    |
  |<-------------------|--------------------|                    |
 ```
 
-### 3.2 Public Inquiry (Loan Options)
+### 3.3 Hallucination Detection and Recovery
 
-This flow demonstrates a public intent that bypasses the security validation layer.
+This flow demonstrates the validation agent detecting and preventing a hallucination.
 
 ```
-User                Lex V2              Lambda (Router)     Lambda (Fulfillment)
+User                Lambda              Bedrock             ValidationAgent     DynamoDB
+ |                    |                    |                    |                    |
+ | "What documents    |                    |                    |                    |
+ |  do I need?"       |                    |                    |                    |
+ |------------------->|                    |                    |                    |
+ |                    | Invoke + tool      |                    |                    |
+ |                    |------------------->|                    |                    |
+ |                    | Tool result:       |                    |                    |
+ |                    | [ID, Proof of      |                    |                    |
+ |                    |  Address]          |                    |                    |
+ |                    |<-------------------|                    |                    |
+ |                    | Response: "You     |                    |                    |
+ |                    | need ID, Address,  |                    |                    |
+ |                    | and Birth Cert"    |                    |                    |
+ |                    |<-------------------|                    |                    |
+ |                    | Validate response  |                    |                    |
+ |                    |----------------------------------->|                    |
+ |                    |                    |                    | Detect: "Birth     |
+ |                    |                    |                    | Cert" not in       |
+ |                    |                    |                    | tool results       |
+ |                    |                    |                    | Severity: MEDIUM   |
+ |                    |                    |                    |------------------->|
+ |                    |                    |                    | Log hallucination  |
+ |                    |                    |                    |<-------------------|
+ |                    |<-----------------------------------|                    |
+ |                    | Regenerate with    |                    |                    |
+ |                    | stricter prompt    |                    |                    |
+ |                    |------------------->|                    |                    |
+ |                    | Corrected response |                    |                    |
+ |                    |<-------------------|                    |                    |
+ | Response: "You     |                    |                    |                    |
+ | need ID and        |                    |                    |                    |
+ | Proof of Address"  |                    |                    |                    |
+ |<-------------------|                    |                    |                    |
+```
+
+### 3.4 Agent Handover with Context Preservation
+
+This flow demonstrates intelligent handover detection and context passing to the agent.
+
+```
+User                Lambda              Bedrock             Connect Queue
  |                    |                    |                    |
- | "I need a loan"    |                    |                    |
+ | "I need to speak   |                    |                    |
+ |  to an agent"      |                    |                    |
  |------------------->|                    |                    |
- |                    | Intent: LoanInq    |                    |
- |                    |------------------->|                    |
- |                    |                    | Check Auth?        |
- |                    |                    | (Not Required)     |
+ |                    | Detect handover    |                    |
+ |                    | (explicit request) |                    |
  |                    |                    |                    |
- |                    |                    | Handle Inquiry     |
- |                    |                    |------------------->|
- |                    |                    |                    | Return Info
- |                    |                    |<-------------------|
- |                    | Fulfill: Options   |                    |
- |<-------------------|--------------------|                    |
-```
-
-### 3.3 Fallback & Classification
-
-This flow demonstrates the AI-powered fallback mechanism using Amazon Bedrock.
-
-```
-User                Lex V2              Lambda (Router)     Amazon Bedrock
+ |                    | Format context:    |                    |
+ |                    | - Main query       |                    |
+ |                    | - Topics discussed |                    |
+ |                    | - Info collected   |                    |
  |                    |                    |                    |
- | "Crypto Account"   |                    |                    |
- |------------------->|                    |                    |
- |                    | Intent: Fallback   |                    |
- |                    |------------------->|                    |
- |                    |                    | Classify Text      |
- |                    |                    |------------------->|
- |                    |                    |                    | "NewIntent" (0.9)
- |                    |                    |<-------------------|
- |                    | Log to DynamoDB    |                    |
- |                    |------------------->|                    |
- |                    | Close: "Noted"     |                    |
- |<-------------------|--------------------|                    |
-```
-
-### 3.4 Companion App Authentication (Seamless Out-of-Band)
-
-This flow integrates a companion mobile app for multi-factor authentication. Instead of speaking a PIN, the user approves a push notification. The voice experience is **seamless**: the system automatically polls for the approval status, so the user does not need to verbally confirm "I'm ready".
-
-**Additional Components Required:**
-1.  **Auth State Table (DynamoDB)**: Stores temporary authentication requests (`request_id`, `status`, `user_id`).
-2.  **Push Notification Service (Amazon SNS / Pinpoint)**: Sends the approval prompt to the user's device.
-3.  **Auth API (API Gateway + Lambda)**: Receives the "Approve" or "Decline" signal from the mobile app.
-
-#### Scenario A: Request Approved
-
-```
-User (Voice)      Mobile App        Lex/Connect         Lambda              Auth State DB       Auth API
- |                    |                    |                    |                    |              |
- | "Check Balance"    |                    |                    |                    |              |
- |---------------------------------------->|                    |                    |              |
- |                    |                    | Intent: CheckBal   |                    |              |
- |                    |                    |------------------->|                    |              |
- |                    |                    |                    | 1. Create Req      |              |
- |                    |                    |                    | (PENDING)          |              |
- |                    |                    |                    |------------------->|              |
- |                    |                    |                    | 2. Send Push       |              |
- |                    | <------------------|--------------------|                    |              |
- |                    |                    |                    |                    |              |
- |                    |                    | 3. Start Polling   |                    |              |
- |                    |                    | (Loop/Wait)        |                    |              |
- |                    |                    |------------------->| 4. Check Status    |              |
- |                    |                    |                    |------------------->|              |
- |                    |                    |                    | Status=PENDING     |              |
- |                    |                    |                    |<-------------------|              |
- |                    |                    |                    |                    |              |
- |                    | 5. User Approves   |                    |                    |              |
- |                    |---------------------------------------------------------------------------->|
- |                    |                    |                    |                    | 6. Update    |
- |                    |                    |                    |                    | (APPROVED)   |
- |                    |                    |                    |                    | <------------|
- |                    |                    |                    |                    |              |
- |                    |                    | (Next Poll)        |                    |              |
- |                    |                    |------------------->| 7. Check Status    |              |
- |                    |                    |                    |------------------->|              |
- |                    |                    |                    | Status=APPROVED    |              |
- |                    |                    |                    |<-------------------|              |
- |                    |                    |                    |                    |              |
- |                    |                    | Fulfill: Balance   |                    |              |
- |<-------------------|--------------------|--------------------|                    |              |
-```
-
-#### Scenario B: Request Declined
-
-```
-User (Voice)      Mobile App        Lex/Connect         Lambda              Auth State DB       Auth API
- |                    |                    |                    |                    |              |
- | "Check Balance"    |                    |                    |                    |              |
- |---------------------------------------->|                    |                    |              |
- |                    |                    | Intent: CheckBal   |                    |              |
- |                    |                    |------------------->|                    |              |
- |                    |                    |                    | 1. Create Req      |              |
- |                    |                    |                    | (PENDING)          |              |
- |                    |                    |                    |------------------->|              |
- |                    |                    |                    | 2. Send Push       |              |
- |                    | <------------------|--------------------|                    |              |
- |                    |                    |                    |                    |              |
- |                    |                    | 3. Start Polling   |                    |              |
- |                    |                    | (Loop/Wait)        |                    |              |
- |                    |                    |------------------->| 4. Check Status    |              |
- |                    |                    |                    |------------------->|              |
- |                    |                    |                    | Status=PENDING     |              |
- |                    |                    |                    |<-------------------|              |
- |                    |                    |                    |                    |              |
- |                    | 5. User Declines   |                    |                    |              |
- |                    |---------------------------------------------------------------------------->|
- |                    |                    |                    |                    | 6. Update    |
- |                    |                    |                    |                    | (DECLINED)   |
- |                    |                    |                    |                    | <------------|
- |                    |                    |                    |                    |              |
- |                    |                    | (Next Poll)        |                    |              |
- |                    |                    |------------------->| 7. Check Status    |              |
- |                    |                    |                    |------------------->|              |
- |                    |                    |                    | Status=DECLINED    |              |
- |                    |                    |                    |<-------------------|              |
- |                    |                    |                    |                    |              |
- |                    |                    | Response: "Unable  |                    |              |
- |                    |                    | to process req."   |                    |              |
- |<-------------------|--------------------|--------------------|                    |              |
+ |                    | Return:            |                    |
+ |                    | TransferToAgent    |                    |
+ |                    | + context          |                    |
+ |                    |----------------------------------->|
+ |                    |                    |                    |
+ | "I'm connecting    |                    |                    |
+ |  you to an agent"  |                    |                    |
+ |<-------------------|                    |                    |
+ |                    |                    |                    | Enter queue
+ |                    |                    |                    | (with context)
+ | Queue flow:        |                    |                    |
+ | - Position updates |                    |                    |
+ | - Callback option  |                    |                    |
+ |<-------------------------------------------------------|
 ```
 
 ---
@@ -356,15 +424,26 @@ The stack is highly configurable via Terraform variables:
 | Variable | Description | Default |
 | :--- | :--- | :--- |
 | `region` | Primary deployment region | `eu-west-2` (London) |
-| `enable_voice_id` | Feature flag for Biometric Auth | `false` |
-| `enable_pin_validation` | Feature flag for PIN Auth | `false` |
-| `mock_data` | JSON string for customer lookup | (Default JSON provided) |
+| `project_name` | Prefix for all resources | `connect-comprehensive` |
+| `bedrock_mcp_lambda` | Lambda configuration object | See below |
 
-### 4.3 Feature Flags & Environment Variables
-Terraform injects configuration directly into the Lambda environment:
-*   `ENABLE_VOICE_ID` -> Controls logic in `validation.py`.
-*   `ENABLE_PIN_VALIDATION` -> Controls logic in `validation.py`.
-*   `MOCK_DATA` -> Parsed by `validation.py` to simulate a CRM lookup.
+**Bedrock MCP Lambda Configuration:**
+```hcl
+bedrock_mcp_lambda = {
+  source_dir = "lambda/bedrock_mcp"
+  handler    = "lambda_function.lambda_handler"
+  runtime    = "python3.11"
+  timeout    = 60
+}
+```
+
+### 4.3 Environment Variables
+Terraform injects configuration directly into the Bedrock MCP Lambda environment:
+*   `BEDROCK_MODEL_ID` -> Claude 3.5 Sonnet model identifier
+*   `AWS_REGION` -> Deployment region
+*   `LOG_LEVEL` -> Logging level (INFO)
+*   `ENABLE_HALLUCINATION_DETECTION` -> Enable validation agent (true)
+*   `HALLUCINATION_TABLE_NAME` -> DynamoDB table for hallucination logs
 
 ---
 

@@ -4,6 +4,7 @@ resource "aws_lambda_function" "this" {
   role          = var.role_arn
   handler       = var.handler
   runtime       = var.runtime
+  timeout       = var.timeout
 
   tracing_config {
     mode = "Active"

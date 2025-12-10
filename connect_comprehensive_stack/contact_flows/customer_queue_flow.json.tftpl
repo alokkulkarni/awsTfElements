@@ -1,0 +1,173 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "initial-message",
+  "Metadata": {
+    "entryPointPosition": { "x": 20, "y": 20 },
+    "name": "CustomerQueueFlow",
+    "description": "Plays while customer waits for agent with position updates and callback option",
+    "type": "customerQueue"
+  },
+  "Actions": [
+    {
+      "Identifier": "initial-message",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for holding. All our specialists are currently assisting other customers. Your call is important to us."
+      },
+      "Transitions": {
+        "NextAction": "check-queue-position"
+      }
+    },
+    {
+      "Identifier": "check-queue-position",
+      "Type": "CheckAttribute",
+      "Parameters": {
+        "Attribute": "Queue.Position",
+        "ComparisonValue": "1"
+      },
+      "Transitions": {
+        "NextAction": "next-in-line-message",
+        "Conditions": [
+          {
+            "NextAction": "next-in-line-message",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["1"]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "position-message",
+            "ErrorType": "NoMatchingCondition"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "next-in-line-message",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "You're next in line. A specialist will be with you shortly."
+      },
+      "Transitions": {
+        "NextAction": "play-hold-music"
+      }
+    },
+    {
+      "Identifier": "position-message",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "You are in the queue. Thank you for your patience."
+      },
+      "Transitions": {
+        "NextAction": "offer-callback"
+      }
+    },
+    {
+      "Identifier": "offer-callback",
+      "Type": "GetParticipantInput",
+      "Parameters": {
+        "Text": "To continue holding, press 1. To request a callback, press 2.",
+        "MaxDigits": 1,
+        "Timeout": 10
+      },
+      "Transitions": {
+        "NextAction": "play-hold-music",
+        "Conditions": [
+          {
+            "NextAction": "play-hold-music",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["Pressed1"]
+            }
+          },
+          {
+            "NextAction": "callback-flow",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["Pressed2"]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "play-hold-music",
+            "ErrorType": "NoMatchingCondition"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "callback-flow",
+      "Type": "InvokeExternalResource",
+      "Parameters": {
+        "FunctionArn": "${callback_lambda_arn}"
+      },
+      "Transitions": {
+        "NextAction": "callback-confirmation",
+        "Errors": [
+          {
+            "NextAction": "callback-error",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "callback-confirmation",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you. We'll call you back within the next hour. You can end this call now."
+      },
+      "Transitions": {
+        "NextAction": "end-flow"
+      }
+    },
+    {
+      "Identifier": "callback-error",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "We're unable to schedule a callback at this time. Please continue holding."
+      },
+      "Transitions": {
+        "NextAction": "play-hold-music"
+      }
+    },
+    {
+      "Identifier": "play-hold-music",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Please continue to hold."
+      },
+      "Transitions": {
+        "NextAction": "wait-30-seconds"
+      }
+    },
+    {
+      "Identifier": "wait-30-seconds",
+      "Type": "Wait",
+      "Parameters": {
+        "WaitTime": 30
+      },
+      "Transitions": {
+        "NextAction": "comfort-message"
+      }
+    },
+    {
+      "Identifier": "comfort-message",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for your patience. A specialist will be with you soon."
+      },
+      "Transitions": {
+        "NextAction": "check-queue-position"
+      }
+    },
+    {
+      "Identifier": "end-flow",
+      "Type": "EndFlowExecution",
+      "Parameters": {}
+    }
+  ]
+}

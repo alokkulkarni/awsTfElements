@@ -10,6 +10,7 @@ import boto3
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
+from validation_agent import ValidationAgent
 
 # Configure logging
 logger = logging.getLogger()
@@ -20,6 +21,9 @@ bedrock_runtime = boto3.client('bedrock-runtime', region_name=os.environ.get('AW
 
 # Initialize MCP Server
 mcp_server = Server("banking-service-mcp")
+
+# Initialize Validation Agent
+validation_agent = ValidationAgent()
 
 # ---------------------------------------------------------------------------------------------------------------------
 # MCP Tools Definition
@@ -413,23 +417,36 @@ def call_bedrock_with_tools(user_message: str, conversation_history: List[Dict] 
     if conversation_history is None:
         conversation_history = []
     
-    # System prompt defining the banking agent persona
-    system_prompt = """You are a helpful and professional banking service agent specializing in account opening processes and debit card services. 
+    # System prompt defining the banking agent persona with natural conversation guidelines
+    system_prompt = """You are a professional banking service specialist helping customers with account opening and debit card services. Engage naturally and conversationally - customers should feel they're speaking with a knowledgeable human colleague.
 
-Your primary responsibilities:
-1. Help customers understand how to open bank accounts (checking, savings, business, student)
-2. Explain account opening procedures for both branch visits and digital channels
-3. Provide information about required documents for account opening
-4. Assist with debit card inquiries and ordering processes
-5. Help customers find nearby branch locations when needed
+Your expertise areas:
+1. Account opening (checking, savings, business, student) - both branch and digital channels
+2. Required documents and eligibility for different account types
+3. Debit card options, features, and ordering processes
+4. Branch locations and services
 
-Always be polite, clear, and concise. When customers ask about account opening or debit cards:
-- Clarify which type of account or card they're interested in
-- Ask if they prefer branch or digital channel (unless already specified)
-- Use the available tools to provide accurate, detailed information
-- Summarize key points in a friendly, conversational manner
+Conversation guidelines:
+- Use natural, varied language - avoid robotic patterns or repetitive phrases
+- Ask clarifying questions conversationally: "Could you tell me a bit more about..." rather than "Please specify..."
+- Acknowledge customer input naturally: "I understand," "That makes sense," "Let me help you with that"
+- Present options conversationally: "You have a couple of options here..." not "Option 1:, Option 2:"
+- Remember context - don't ask for information already provided
+- Be warm but professional - use phrases like "I'd be happy to help" or "Great question"
 
-If you need to use a tool, call it with the appropriate parameters. After receiving tool results, synthesize the information into a natural, helpful response for the customer."""
+When you need information from tools:
+- Call the appropriate tool with correct parameters
+- Synthesize tool results into natural, conversational responses
+- Highlight key points without overwhelming the customer
+- Offer next steps naturally
+
+When you cannot help:
+- If a query is beyond your tools or expertise, respond: "I'd be happy to connect you with one of our specialists who can better assist you with this. One moment please."
+- If you detect customer frustration (repeated questions, negative tone), offer: "I want to make sure you get the best help possible. Let me connect you with a specialist who can assist you directly."
+- Never explicitly state you're an AI or bot
+- Always maintain a professional, helpful tone during handover
+
+Remember: Your goal is a seamless, natural conversation that provides accurate information and excellent service."""
     
     # Build conversation history
     messages = []
@@ -620,6 +637,98 @@ def format_response_for_lex(bedrock_response: Dict[str, Any], final_response: st
     }
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Handover Detection Logic
+# ---------------------------------------------------------------------------------------------------------------------
+
+def detect_handover_need(user_message: str, bedrock_response: Dict[str, Any], conversation_history: List[Dict]) -> tuple:
+    """
+    Analyze conversation for handover indicators.
+    Returns: (should_handover: bool, reason: str, message: str)
+    """
+    
+    # Check for explicit agent requests
+    agent_keywords = ["speak to agent", "human", "person", "representative", "someone", "talk to someone"]
+    if any(keyword in user_message.lower() for keyword in agent_keywords):
+        return (True, "explicit_request", 
+                "I'd be happy to connect you with one of our specialists. One moment please.")
+    
+    # Check for frustration indicators
+    frustration_keywords = ["frustrated", "annoyed", "useless", "terrible", "awful", "ridiculous"]
+    if any(keyword in user_message.lower() for keyword in frustration_keywords):
+        return (True, "customer_frustration",
+                "I want to make sure you get the best help possible. Let me connect you with a specialist who can assist you directly.")
+    
+    # Check for repeated questions (same user message appears 3+ times in recent history)
+    recent_user_messages = [msg.get("content", "") for msg in conversation_history[-10:] if msg.get("role") == "user"]
+    if recent_user_messages.count(user_message) >= 3:
+        return (True, "repeated_query",
+                "I'd like to connect you with a specialist who can provide more detailed assistance. One moment please.")
+    
+    # Check if Bedrock indicates it cannot help
+    response_text = ""
+    content = bedrock_response.get("content", [])
+    for item in content:
+        if item.get("type") == "text":
+            response_text += item.get("text", "")
+    
+    cannot_help_phrases = ["I cannot", "I'm unable", "beyond my capabilities", "I don't have", "I can't help"]
+    if any(phrase.lower() in response_text.lower() for phrase in cannot_help_phrases):
+        return (True, "capability_limitation",
+                "I'd be happy to connect you with one of our specialists who can better assist you with this. One moment please.")
+    
+    # Check for error responses
+    if bedrock_response.get("stop_reason") == "error" or bedrock_response.get("error"):
+        return (True, "technical_issues",
+                "Let me connect you with one of our specialists who can help you right away.")
+    
+    return (False, None, None)
+
+def initiate_agent_handover(conversation_history: List[Dict], handover_reason: str, user_message: str) -> Dict[str, Any]:
+    """
+    Format response to trigger agent handover in Connect.
+    """
+    # Extract conversation summary
+    conversation_summary = {
+        "customer_query": user_message,
+        "conversation_turns": len(conversation_history) // 2,
+        "handover_reason": handover_reason,
+        "conversation_history": conversation_history[-10:]  # Last 5 exchanges
+    }
+    
+    # Handover messages based on reason
+    handover_messages = {
+        "explicit_request": "I'd be happy to connect you with one of our specialists. One moment please.",
+        "customer_frustration": "I want to make sure you get the best help possible. Let me connect you with a specialist who can assist you directly.",
+        "repeated_query": "I'd like to connect you with a specialist who can provide more detailed assistance. One moment please.",
+        "capability_limitation": "I'd be happy to connect you with one of our specialists who can better assist you with this. One moment please.",
+        "technical_issues": "Let me connect you with one of our specialists who can help you right away."
+    }
+    
+    message = handover_messages.get(handover_reason, handover_messages["explicit_request"])
+    
+    return {
+        "sessionState": {
+            "dialogAction": {
+                "type": "Close"
+            },
+            "intent": {
+                "name": "TransferToAgent",
+                "state": "Fulfilled"
+            },
+            "sessionAttributes": {
+                "conversation_summary": json.dumps(conversation_summary),
+                "handover_reason": handover_reason
+            }
+        },
+        "messages": [
+            {
+                "contentType": "PlainText",
+                "content": message
+            }
+        ]
+    }
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Lambda Handler
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -649,6 +758,15 @@ def lambda_handler(event, context):
         
         # Call Bedrock with the user's message
         bedrock_response = call_bedrock_with_tools(input_transcript, conversation_history)
+        
+        # Check for handover need before processing response
+        should_handover, handover_reason, handover_message = detect_handover_need(
+            input_transcript, bedrock_response, conversation_history
+        )
+        
+        if should_handover:
+            logger.info(f"Handover triggered - Reason: {handover_reason}")
+            return initiate_agent_handover(conversation_history, handover_reason, input_transcript)
         
         # Check if tools need to be called
         stop_reason = bedrock_response.get("stop_reason")
@@ -693,6 +811,20 @@ def lambda_handler(event, context):
             final_content = final_response.get("content", [])
             final_text = " ".join([item.get("text", "") for item in final_content if item.get("type") == "text"])
             
+            # Validate response with ValidationAgent
+            session_id = event.get('sessionId', 'unknown')
+            is_valid, validation_details = validation_agent.validate_response(
+                user_query=input_transcript,
+                tool_results={"tool_results": tool_results},
+                model_response=final_text,
+                session_id=session_id
+            )
+            
+            # If validation fails with high severity, request regeneration
+            if not is_valid and validation_details.get('severity') == 'high':
+                logger.warning(f"High severity hallucination detected, triggering handover")
+                return initiate_agent_handover(conversation_history, "validation_failure", input_transcript)
+            
             # Update conversation history
             conversation_history.extend([
                 {"role": "user", "content": input_transcript},
@@ -709,6 +841,20 @@ def lambda_handler(event, context):
             # No tool use, direct response
             content = bedrock_response.get("content", [])
             response_text = " ".join([item.get("text", "") for item in content if item.get("type") == "text"])
+            
+            # Validate response with ValidationAgent (no tool results for direct responses)
+            session_id = event.get('sessionId', 'unknown')
+            is_valid, validation_details = validation_agent.validate_response(
+                user_query=input_transcript,
+                tool_results={},
+                model_response=response_text,
+                session_id=session_id
+            )
+            
+            # If validation fails with high severity, trigger handover
+            if not is_valid and validation_details.get('severity') == 'high':
+                logger.warning(f"High severity hallucination detected in direct response, triggering handover")
+                return initiate_agent_handover(conversation_history, "validation_failure", input_transcript)
             
             # Update conversation history
             conversation_history.extend([
@@ -735,20 +881,25 @@ def lambda_handler(event, context):
         
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}", exc_info=True)
+        # On error, transfer to agent instead of showing technical error
         return {
             "sessionState": {
                 "dialogAction": {
                     "type": "Close"
                 },
                 "intent": {
-                    "name": "FallbackIntent",
-                    "state": "Failed"
+                    "name": "TransferToAgent",
+                    "state": "Fulfilled"
+                },
+                "sessionAttributes": {
+                    "handover_reason": "technical_error",
+                    "error_details": str(e)
                 }
             },
             "messages": [
                 {
                     "contentType": "PlainText",
-                    "content": "I apologize, but I'm experiencing technical difficulties. Please try again in a moment or contact our support team."
+                    "content": "Let me connect you with one of our specialists who can assist you. One moment please."
                 }
             ]
         }
