@@ -1,28 +1,31 @@
 {
   "Version": "2019-10-30",
-  "StartAction": "play-welcome",
+  "StartAction": "connect-to-lex",
   "Metadata": {
-    "entryPointPosition": {
-      "x": 20,
-      "y": 20
-    },
+    "entryPointPosition": { "x": 20, "y": 20 },
     "snapToGrid": false,
-    "name": "VoiceEntryFlow",
-    "description": "Voice entry point",
+    "name": "BedrockPrimaryFlow",
+    "description": "Bedrock-primary flow with Lex integration",
     "type": "contactFlow",
-    "status": "PUBLISHED",
-    "hash": {}
+    "status": "published"
   },
   "Actions": [
     {
-      "Identifier": "play-welcome",
-      "Type": "MessageParticipant",
+      "Identifier": "connect-to-lex",
+      "Type": "ConnectParticipantWithLexBot",
       "Parameters": {
-        "Text": "Thank you for calling. Connecting you to an agent."
+        "Text": "Hello! Welcome to our banking service. I can help you with opening accounts and ordering debit cards. How can I assist you today?",
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
       },
       "Transitions": {
         "NextAction": "set-queue",
         "Errors": [
+          {
+            "NextAction": "set-queue",
+            "ErrorType": "NoMatchingCondition"
+          },
           {
             "NextAction": "set-queue",
             "ErrorType": "NoMatchingError"
@@ -35,21 +38,20 @@
       "Identifier": "set-queue",
       "Type": "UpdateContactTargetQueue",
       "Parameters": {
-        "QueueId": "${general_queue_arn}"
+        "QueueId": "${queue_arn}"
       },
       "Transitions": {
-        "NextAction": "transfer-to-queue",
+        "NextAction": "transfer-to-agent",
         "Errors": [
           {
             "NextAction": "disconnect",
             "ErrorType": "NoMatchingError"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
-      "Identifier": "transfer-to-queue",
+      "Identifier": "transfer-to-agent",
       "Type": "TransferContactToQueue",
       "Transitions": {
         "NextAction": "disconnect",
@@ -62,8 +64,7 @@
             "NextAction": "disconnect",
             "ErrorType": "QueueAtCapacity"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {

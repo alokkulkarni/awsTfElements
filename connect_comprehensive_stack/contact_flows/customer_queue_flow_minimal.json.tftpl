@@ -1,0 +1,55 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "play-music",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 20,
+      "y": 20
+    },
+    "snapToGrid": false,
+    "name": "CustomerQueueFlow",
+    "description": "Simple queue flow with hold messages",
+    "type": "customerQueue",
+    "status": "published",
+    "ActionMetadata": {
+      "play-music": {
+        "position": {"x": 100, "y": 20}
+      },
+      "end-flow": {
+        "position": {"x": 100, "y": 120}
+      }
+    }
+  },
+  "Actions": [
+    {
+      "Identifier": "play-music",
+      "Type": "MessageParticipantIteratively",
+      "Parameters": {
+        "InterruptFrequencySeconds": "30",
+        "Messages": [
+          {
+            "Text": "Thank you for holding. A specialist will be with you shortly."
+          }
+        ]
+      },
+      "Transitions": {
+        "Errors": [],
+        "Conditions": [
+          {
+            "NextAction": "end-flow",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["MessagesInterrupted"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "end-flow",
+      "Type": "EndFlowExecution",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

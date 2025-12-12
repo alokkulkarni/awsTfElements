@@ -23,11 +23,11 @@
         "NextAction": "start-lex",
         "Errors": [
           {
-            "NextAction": "transfer-to-agent",
+            "NextAction": "set-queue",
             "ErrorType": "NoMatchingCondition"
           },
           {
-            "NextAction": "transfer-to-agent",
+            "NextAction": "set-queue",
             "ErrorType": "NoMatchingError"
           }
         ],
@@ -35,17 +35,34 @@
       }
     },
     {
-      "Identifier": "transfer-to-agent",
-      "Type": "TransferToQueue",
+      "Identifier": "set-queue",
+      "Type": "UpdateContactTargetQueue",
       "Parameters": {
         "QueueId": "${general_queue_arn}"
       },
+      "Transitions": {
+        "NextAction": "transfer-to-agent",
+        "Errors": [
+          {
+            "NextAction": "disconnect-chat",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "transfer-to-agent",
+      "Type": "TransferContactToQueue",
       "Transitions": {
         "NextAction": "disconnect-chat",
         "Errors": [
           {
             "NextAction": "disconnect-chat",
             "ErrorType": "NoMatchingError"
+          },
+          {
+            "NextAction": "disconnect-chat",
+            "ErrorType": "QueueAtCapacity"
           }
         ]
       }

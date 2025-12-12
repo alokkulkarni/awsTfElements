@@ -138,22 +138,23 @@ resource "aws_connect_instance_storage_config" "call_recordings" {
   }
 }
 
-resource "aws_connect_instance_storage_config" "contact_trace_records" {
-  instance_id   = module.connect_instance.id
-  resource_type = "CONTACT_TRACE_RECORDS"
-
-  storage_config {
-    s3_config {
-      bucket_name   = module.connect_storage_bucket.id
-      bucket_prefix = "contact-trace-records"
-      encryption_config {
-        encryption_type = "KMS"
-        key_id          = module.kms_key.arn
-      }
-    }
-    storage_type = "S3"
-  }
-}
+# Contact Trace Records storage not supported for this instance type
+# resource "aws_connect_instance_storage_config" "contact_trace_records" {
+#   instance_id   = module.connect_instance.id
+#   resource_type = "CONTACT_TRACE_RECORDS"
+#
+#   storage_config {
+#     s3_config {
+#       bucket_name   = module.connect_storage_bucket.id
+#       bucket_prefix = "contact-trace-records"
+#       encryption_config {
+#         encryption_type = "KMS"
+#         key_id          = module.kms_key.arn
+#       }
+#     }
+#     storage_type = "S3"
+#   }
+# }
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Default Agent User
@@ -221,7 +222,7 @@ resource "aws_connect_routing_profile" "main" {
 # - Best for: New agents, testing, or simple routing scenarios
 resource "aws_connect_routing_profile" "basic" {
   instance_id = module.connect_instance.id
-  name        = "Basic Routing Profile"
+  name        = "Bedrock Basic Routing Profile"
   description = "Entry-level profile for basic queue routing"
   default_outbound_queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
 
@@ -433,7 +434,6 @@ module "callback_lambda" {
 
   environment_variables = {
     CALLBACK_TABLE_NAME = module.callback_table.name
-    AWS_REGION          = var.region
     LOG_LEVEL           = "INFO"
   }
 
@@ -562,7 +562,6 @@ module "bedrock_mcp_lambda" {
   environment_variables = {
     # Bedrock Configuration
     BEDROCK_MODEL_ID                = "anthropic.claude-3-5-sonnet-20241022-v2:0"
-    AWS_REGION                      = var.region
     
     # Logging
     LOG_LEVEL                       = "INFO"
@@ -605,6 +604,30 @@ resource "aws_lexv2models_bot_locale" "en_us" {
     voice_id = "Joanna"
     engine   = "neural"
   }
+}
+
+# Create ChatIntent for en_US locale (required to build locale)
+resource "aws_lexv2models_intent" "chat_en_us" {
+  bot_id      = module.lex_bot.bot_id
+  bot_version = "DRAFT"
+  locale_id   = "en_US"
+  name        = "ChatIntent"
+  
+  sample_utterance {
+    utterance = "Hi"
+  }
+  sample_utterance {
+    utterance = "Hello"
+  }
+  sample_utterance {
+    utterance = "I need help"
+  }
+
+  fulfillment_code_hook {
+    enabled = true
+  }
+
+  depends_on = [aws_lexv2models_bot_locale.en_us]
 }
 
 # Intents are no longer needed - using FallbackIntent only (created by module)
@@ -778,6 +801,17 @@ resource "awscc_lex_bot_alias" "this" {
           }
         }
         enabled = true
+      }
+    ]
+    audio_log_settings = [
+      {
+        destination = {
+          s3_bucket = {
+            s3_bucket_arn = module.connect_storage_bucket.arn
+            log_prefix    = "lex-audio-logs"
+          }
+        }
+        enabled = false
       }
     ]
   }
@@ -1242,9 +1276,9 @@ resource "aws_connect_contact_flow" "bedrock_primary" {
   name        = "BedrockPrimaryFlow"
   description = "Bedrock-primary architecture with input preservation and seamless agent handover"
   type        = "CONTACT_FLOW"
-  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
-    lex_bot_alias_arn       = awscc_lex_bot_alias.this.arn
-    general_agent_queue_arn = aws_connect_queue.queues["GeneralAgentQueue"].arn
+  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow_simple.json.tftpl", {
+    lex_bot_alias_arn = awscc_lex_bot_alias.this.arn
+    queue_arn         = aws_connect_queue.queues["GeneralAgentQueue"].arn
   })
   tags = var.tags
 
@@ -1258,16 +1292,12 @@ resource "aws_connect_contact_flow" "bedrock_primary" {
 resource "aws_connect_contact_flow" "customer_queue" {
   instance_id = module.connect_instance.id
   name        = "CustomerQueueFlow"
-  description = "Queue flow with position updates and callback option"
+  description = "Simple queue flow with hold messages"
   type        = "CUSTOMER_QUEUE"
-  content = templatefile("${path.module}/contact_flows/customer_queue_flow.json.tftpl", {
-    callback_lambda_arn = module.callback_lambda.arn
-  })
+  content = templatefile("${path.module}/contact_flows/customer_queue_flow_minimal.json.tftpl", {})
   tags = var.tags
 
-  depends_on = [
-    module.callback_lambda
-  ]
+  depends_on = []
 }
 
 # Associate Lex Bot with Connect Instance
@@ -1284,7 +1314,7 @@ resource "null_resource" "lex_bot_association" {
 
   provisioner "local-exec" {
     when    = destroy
-    command = "aws connect disassociate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region}"
+    command = "aws connect disassociate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region} || true"
   }
 }
 
@@ -1682,8 +1712,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         type = "metric"
         properties = {
           metrics = [
-            ["AWS/Connect", "QueueSize", { stat = "Average", label = "Queue Size", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }],
-            [".", "LongestQueueWaitTime", { stat = "Maximum", label = "Max Wait Time (s)", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }]
+            ["AWS/Connect", "QueueSize", "InstanceId", module.connect_instance.id, "MetricGroup", "Queue", "QueueName", "GeneralAgentQueue", { stat = "Average", label = "Queue Size" }],
+            [".", "LongestQueueWaitTime", ".", ".", ".", ".", ".", ".", { stat = "Maximum", label = "Max Wait Time (s)" }]
           ]
           view    = "timeSeries"
           stacked = false
@@ -1700,8 +1730,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         type = "metric"
         properties = {
           metrics = [
-            ["AWS/Connect", "ContactsHandled", { stat = "Sum", label = "Handled", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }],
-            [".", "ContactsAbandoned", { stat = "Sum", label = "Abandoned", dimensions = { InstanceId = module.connect_instance.id, MetricGroup = "Queue", QueueName = "GeneralAgentQueue" } }]
+            ["AWS/Connect", "ContactsHandled", "InstanceId", module.connect_instance.id, "MetricGroup", "Queue", "QueueName", "GeneralAgentQueue", { stat = "Sum", label = "Handled" }],
+            [".", "ContactsAbandoned", ".", ".", ".", ".", ".", ".", { stat = "Sum", label = "Abandoned" }]
           ]
           view    = "timeSeries"
           stacked = false
@@ -1719,7 +1749,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         type = "metric"
         properties = {
           metrics = [
-            ["AWS/Lambda", "Errors", { stat = "Sum", label = "Lambda Errors", dimensions = { FunctionName = module.bedrock_mcp_lambda.function_name } }],
+            ["AWS/Lambda", "Errors", "FunctionName", module.bedrock_mcp_lambda.function_name, { stat = "Sum", label = "Lambda Errors" }],
             ["Connect/BedrockMCP", "BedrockAPIErrors", { stat = "Sum", label = "Bedrock API Errors" }],
             [".", "ValidationTimeouts", { stat = "Sum", label = "Validation Timeouts" }]
           ]
@@ -1738,9 +1768,8 @@ resource "aws_cloudwatch_dashboard" "main" {
         type = "metric"
         properties = {
           metrics = [
-            ["AWS/Lambda", "Duration", { stat = "Average", label = "Avg Duration (ms)", dimensions = { FunctionName = module.bedrock_mcp_lambda.function_name } }],
-            ["...", { stat = "Maximum", label = "Max Duration (ms)" }],
-            [".", "Invocations", { stat = "Sum", label = "Invocations" }]
+            ["AWS/Lambda", "Duration", "FunctionName", module.bedrock_mcp_lambda.function_name, { stat = "Average", label = "Avg Duration (ms)" }],
+            ["AWS/Lambda", "Invocations", "FunctionName", module.bedrock_mcp_lambda.function_name, { stat = "Sum", label = "Invocations" }]
           ]
           view    = "timeSeries"
           stacked = false

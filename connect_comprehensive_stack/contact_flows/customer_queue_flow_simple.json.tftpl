@@ -1,0 +1,77 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "initial-message",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 20,
+      "y": 20
+    },
+    "snapToGrid": false,
+    "name": "CustomerQueueFlow",
+    "description": "Simple queue flow with hold music and periodic messages",
+    "type": "customerQueue",
+    "status": "published",
+    "ActionMetadata": {
+      "initial-message": {
+        "position": {"x": 100, "y": 20}
+      },
+      "play-hold-music": {
+        "position": {"x": 100, "y": 120}
+      },
+      "wait-30-seconds": {
+        "position": {"x": 100, "y": 220}
+      },
+      "comfort-message": {
+        "position": {"x": 100, "y": 320}
+      }
+    }
+  },
+  "Actions": [
+    {
+      "Identifier": "initial-message",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for holding. A specialist will be with you shortly."
+      },
+      "Transitions": {
+        "NextAction": "play-hold-music",
+        "Errors": [],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-hold-music",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Please continue to hold."
+      },
+      "Transitions": {
+        "NextAction": "wait-30-seconds",
+        "Errors": [],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "wait-30-seconds",
+      "Type": "Wait",
+      "Parameters": {
+        "WaitTimeSeconds": "30"
+      },
+      "Transitions": {
+        "NextAction": "comfort-message"
+      }
+    },
+    {
+      "Identifier": "comfort-message",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for your patience. A specialist will be with you soon."
+      },
+      "Transitions": {
+        "NextAction": "play-hold-music",
+        "Errors": [],
+        "Conditions": []
+      }
+    }
+  ]
+}

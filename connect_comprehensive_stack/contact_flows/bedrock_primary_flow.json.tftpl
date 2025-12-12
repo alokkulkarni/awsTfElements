@@ -7,7 +7,7 @@
     "name": "BedrockPrimaryFlow",
     "description": "Bedrock-primary flow with input preservation and seamless agent handover",
     "type": "contactFlow",
-    "status": "PUBLISHED"
+    "status": "published"
   },
   "Actions": [
     {
@@ -30,7 +30,8 @@
             "NextAction": "error-handler",
             "ErrorType": "NoMatchingCondition"
           }
-        ]
+        ],
+        "Conditions": []
       }
     },
     {
@@ -44,7 +45,7 @@
         "NextAction": "disconnect",
         "Conditions": [
           {
-            "NextAction": "transfer-to-agent",
+            "NextAction": "set-queue",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["TransferToAgent"]
@@ -66,24 +67,49 @@
         "Text": "Let me connect you with one of our specialists who can assist you. One moment please."
       },
       "Transitions": {
-        "NextAction": "transfer-to-agent"
+        "NextAction": "set-queue",
+        "Errors": [],
+        "Conditions": []
       }
     },
     {
-      "Identifier": "transfer-to-agent",
-      "Type": "TransferToQueue",
+      "Identifier": "set-queue",
+      "Type": "UpdateContactTargetQueue",
       "Parameters": {
         "QueueId": "${general_agent_queue_arn}"
       },
       "Transitions": {
+        "NextAction": "transfer-to-agent",
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "transfer-to-agent",
+      "Type": "TransferContactToQueue",
+      "Transitions": {
         "NextAction": "disconnect",
-        "Errors": []
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
+          },
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "QueueAtCapacity"
+          }
+        ]
       }
     },
     {
       "Identifier": "disconnect",
       "Type": "DisconnectParticipant",
-      "Parameters": {}
+      "Parameters": {},
+      "Transitions": {}
     }
   ]
 }
