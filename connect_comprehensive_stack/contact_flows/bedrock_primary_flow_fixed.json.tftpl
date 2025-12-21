@@ -1,6 +1,6 @@
 {
   "Version": "2019-10-30",
-  "StartAction": "connect-to-lex",
+  "StartAction": "play-greeting",
   "Metadata": {
     "entryPointPosition": { "x": 20, "y": 20 },
     "snapToGrid": false,
@@ -11,10 +11,25 @@
   },
   "Actions": [
     {
+      "Identifier": "play-greeting",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Hello! Welcome to our banking service. I can help you with opening accounts and ordering debit cards. How can I assist you today?"
+      },
+      "Transitions": {
+        "NextAction": "connect-to-lex",
+        "Errors": [
+          {
+            "NextAction": "connect-to-lex",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
       "Identifier": "connect-to-lex",
       "Type": "ConnectParticipantWithLexBot",
       "Parameters": {
-        "Text": "Hello! Welcome to our banking service. I can help you with opening accounts and ordering debit cards. How can I assist you today?",
         "LexV2Bot": {
           "AliasArn": "${lex_bot_alias_arn}"
         },

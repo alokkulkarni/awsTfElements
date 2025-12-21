@@ -730,6 +730,29 @@ resource "aws_lexv2models_intent" "chat_en_us" {
     enabled = true
   }
 
+  dialog_code_hook {
+    enabled = true
+  }
+
+  depends_on = [aws_lexv2models_bot_locale.en_us]
+}
+
+# Create FallbackIntent for en_US locale
+resource "aws_lexv2models_intent" "fallback_en_us" {
+  bot_id                  = module.lex_bot.bot_id
+  bot_version             = "DRAFT"
+  locale_id               = "en_US"
+  name                    = "FallbackIntent"
+  parent_intent_signature = "AMAZON.FallbackIntent"
+
+  fulfillment_code_hook {
+    enabled = true
+  }
+
+  dialog_code_hook {
+    enabled = true
+  }
+
   depends_on = [aws_lexv2models_bot_locale.en_us]
 }
 
@@ -1439,7 +1462,7 @@ resource "aws_connect_contact_flow" "bedrock_primary" {
   name        = "BedrockPrimaryFlow"
   description = "Bedrock-primary architecture with multi-turn conversation and intelligent agent transfer - PRIMARY FLOW FOR PHONE NUMBERS"
   type        = "CONTACT_FLOW"
-  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow_fixed.json.tftpl", {
+  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
     lex_bot_alias_arn = awscc_lex_bot_alias.this.arn
     queue_arn         = aws_connect_queue.queues["GeneralAgentQueue"].arn
   })

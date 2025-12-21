@@ -82,6 +82,26 @@ resource "aws_lexv2models_intent" "chat" {
   fulfillment_code_hook {
     enabled = true
   }
+
+  dialog_code_hook {
+    enabled = true
+  }
+}
+
+resource "aws_lexv2models_intent" "fallback" {
+  bot_id                  = aws_lexv2models_bot.this.id
+  bot_version             = "DRAFT"
+  locale_id               = aws_lexv2models_bot_locale.this.locale_id
+  name                    = "FallbackIntent"
+  parent_intent_signature = "AMAZON.FallbackIntent"
+
+  fulfillment_code_hook {
+    enabled = true
+  }
+
+  dialog_code_hook {
+    enabled = true
+  }
 }
 
 

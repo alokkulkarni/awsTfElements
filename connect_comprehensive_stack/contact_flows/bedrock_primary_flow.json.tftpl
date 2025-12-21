@@ -2,82 +2,110 @@
   "Version": "2019-10-30",
   "StartAction": "connect-to-lex",
   "Metadata": {
-    "entryPointPosition": { "x": 20, "y": 20 },
-    "snapToGrid": false,
+    "entryPointPosition": {
+      "x": 20,
+      "y": 20
+    },
+    "ActionMetadata": {
+      "disconnect": {
+        "position": {
+          "x": 973.6,
+          "y": 313.6
+        }
+      },
+      "transfer-to-agent": {
+        "position": {
+          "x": 708.8,
+          "y": 353.6
+        }
+      },
+      "error-handler": {
+        "position": {
+          "x": 410.4,
+          "y": 65.6
+        }
+      },
+      "set-queue": {
+        "position": {
+          "x": 411.2,
+          "y": 428
+        }
+      },
+      "connect-to-lex": {
+        "position": {
+          "x": 119.2,
+          "y": 222.4
+        },
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": {}
+          }
+        },
+        "dynamicMetadata": {
+          "$.Attributes.ContactId": false
+        },
+        "lexV2BotName": "",
+        "conditionMetadata": [
+          {
+            "id": "1b46a74b-7e13-4780-a8de-1ae23bb59c6b",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferToAgent"
+          }
+        ]
+      }
+    },
+    "Annotations": [],
     "name": "BedrockPrimaryFlow",
-    "description": "Bedrock-primary flow with input preservation and seamless agent handover",
+    "description": "Bedrock-primary architecture with multi-turn conversation and intelligent agent transfer - PRIMARY FLOW FOR PHONE NUMBERS",
     "type": "contactFlow",
-    "status": "published"
+    "status": "published",
+    "hash": {}
   },
   "Actions": [
     {
-      "Identifier": "connect-to-lex",
-      "Type": "ConnectParticipantWithLexBot",
-      "Parameters": {
-        "Text": "Hello! Welcome to our banking service. I can help you with opening accounts and ordering debit cards. How can I assist you today?",
-        "LexV2Bot": {
-          "AliasArn": "${lex_bot_alias_arn}"
-        }
-      },
-      "Transitions": {
-        "NextAction": "check-intent",
-        "Errors": [
-          {
-            "NextAction": "error-handler",
-            "ErrorType": "NoMatchingError"
-          },
-          {
-            "NextAction": "error-handler",
-            "ErrorType": "NoMatchingCondition"
-          }
-        ],
-        "Conditions": []
-      }
+      "Parameters": {},
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Transitions": {}
     },
     {
-      "Identifier": "check-intent",
-      "Type": "CheckAttribute",
-      "Parameters": {
-        "Attribute": "IntentName",
-        "ComparisonValue": "TransferToAgent"
-      },
+      "Parameters": {},
+      "Identifier": "transfer-to-agent",
+      "Type": "TransferContactToQueue",
       "Transitions": {
         "NextAction": "disconnect",
-        "Conditions": [
-          {
-            "NextAction": "set-queue",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["TransferToAgent"]
-            }
-          }
-        ],
         "Errors": [
           {
             "NextAction": "disconnect",
-            "ErrorType": "NoMatchingCondition"
+            "ErrorType": "QueueAtCapacity"
+          },
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
           }
         ]
       }
     },
     {
-      "Identifier": "error-handler",
-      "Type": "MessageParticipant",
       "Parameters": {
         "Text": "Let me connect you with one of our specialists who can assist you. One moment please."
       },
+      "Identifier": "error-handler",
+      "Type": "MessageParticipant",
       "Transitions": {
-        "NextAction": "set-queue",
-        "Errors": [],
-        "Conditions": []
+        "NextAction": "set-queue"
       }
     },
     {
+      "Parameters": {
+        "QueueId": "${queue_arn}"
+      },
       "Identifier": "set-queue",
       "Type": "UpdateContactTargetQueue",
-      "Parameters": {
-        "QueueId": "${general_agent_queue_arn}"
-      },
       "Transitions": {
         "NextAction": "transfer-to-agent",
         "Errors": [
@@ -89,27 +117,41 @@
       }
     },
     {
-      "Identifier": "transfer-to-agent",
-      "Type": "TransferContactToQueue",
+      "Parameters": {
+        "Text": "Hello! Welcome to our banking service. I can help you with opening accounts and ordering debit cards. How can I assist you today?",
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        },
+        "LexSessionAttributes": {
+          "x-amz-lex:audio:start-timeout-ms": "5000"
+        }
+      },
+      "Identifier": "connect-to-lex",
+      "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "disconnect",
+        "NextAction": "connect-to-lex",
+        "Conditions": [
+          {
+            "NextAction": "set-queue",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          }
+        ],
         "Errors": [
           {
-            "NextAction": "disconnect",
-            "ErrorType": "NoMatchingError"
+            "NextAction": "connect-to-lex",
+            "ErrorType": "NoMatchingCondition"
           },
           {
-            "NextAction": "disconnect",
-            "ErrorType": "QueueAtCapacity"
+            "NextAction": "error-handler",
+            "ErrorType": "NoMatchingError"
           }
         ]
       }
-    },
-    {
-      "Identifier": "disconnect",
-      "Type": "DisconnectParticipant",
-      "Parameters": {},
-      "Transitions": {}
     }
   ]
 }
