@@ -72,11 +72,16 @@ resource "aws_connect_phone_number" "toll_free" {
   tags         = var.tags
 }
 
+# ===== PHONE NUMBER ASSOCIATION TO PRIMARY CONTACT FLOW =====
+# Both inbound phone numbers (DID and Toll-Free) are associated with
+# the BedrockPrimaryFlow contact flow which routes calls to the Lex bot
+# for AI-powered conversation with Bedrock and intelligent agent transfer.
+# ==============================================================
 # Associate Phone Numbers with Contact Flow (Inbound)
 resource "null_resource" "associate_phone_numbers" {
   triggers = {
     instance_id     = module.connect_instance.id
-    contact_flow_id = aws_connect_contact_flow.voice_entry.contact_flow_id
+    contact_flow_id = aws_connect_contact_flow.bedrock_primary.contact_flow_id
     outbound_id     = aws_connect_phone_number.outbound.id
     toll_free_id    = aws_connect_phone_number.toll_free.id
     region          = var.region
@@ -100,7 +105,7 @@ resource "null_resource" "associate_phone_numbers" {
     command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --region ${self.triggers.region} || true"
   }
   
-  depends_on = [aws_connect_contact_flow.voice_entry]
+  depends_on = [aws_connect_contact_flow.bedrock_primary]
 }
 
 # Connect Storage Configuration
@@ -464,10 +469,65 @@ module "bedrock_guardrail" {
 # ---------------------------------------------------------------------------------------------------------------------
 # Lambda for Bedrock MCP Integration (Primary Intent Classification and Tool Calling)
 # ---------------------------------------------------------------------------------------------------------------------
+# Trigger to detect Lambda source code changes
+data "local_file" "bedrock_lambda_source" {
+  filename = "${path.module}/${var.bedrock_mcp_lambda.source_dir}/lambda_function.py"
+}
+
+# Trigger to detect dependency changes
+data "local_file" "bedrock_lambda_requirements" {
+  filename = "${path.module}/${var.bedrock_mcp_lambda.source_dir}/requirements.txt"
+}
+
+# Build the Lambda deployment package with dependencies (FastMCP 2.0)
+resource "null_resource" "bedrock_mcp_build" {
+  triggers = {
+    src_hash = data.local_file.bedrock_lambda_source.content_md5
+    req_hash = data.local_file.bedrock_lambda_requirements.content_md5
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      BUILD_DIR="${path.module}/.lambda_build/bedrock_mcp"
+      ZIP_PATH="$(pwd)/lambda/bedrock_mcp.zip"
+      SRC_DIR="${path.module}/${var.bedrock_mcp_lambda.source_dir}"
+
+      echo "📦 Preparing Lambda build directory: $BUILD_DIR"
+      rm -rf "$BUILD_DIR" "$ZIP_PATH"
+      mkdir -p "$BUILD_DIR"
+
+      echo "📄 Copying source files..."
+      rsync -a --exclude __pycache__/ "$SRC_DIR/" "$BUILD_DIR/"
+
+      if [ -f "$SRC_DIR/requirements.txt" ]; then
+        echo "📥 Installing Python dependencies into build dir..."
+        python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
+        python3 -m pip install -r "$SRC_DIR/requirements.txt" -t "$BUILD_DIR" --no-cache-dir
+      fi
+
+      echo "🧩 Creating deployment zip: $ZIP_PATH"
+      mkdir -p "$(dirname "$ZIP_PATH")"
+      pushd "$BUILD_DIR" >/dev/null
+      zip -r9 "$ZIP_PATH" .
+      popd >/dev/null
+
+      echo "✅ Build complete: $ZIP_PATH"
+    EOT
+  }
+}
+
+# Archive the built directory to produce the final artifact (kept for dependency wiring)
 data "archive_file" "bedrock_mcp_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/${var.bedrock_mcp_lambda.source_dir}"
+  source_dir  = "${path.module}/.lambda_build/bedrock_mcp"
   output_path = "${path.module}/lambda/bedrock_mcp.zip"
+
+  depends_on = [
+    null_resource.bedrock_mcp_build,
+    data.local_file.bedrock_lambda_source,
+    data.local_file.bedrock_lambda_requirements
+  ]
 }
 
 resource "aws_iam_role" "lambda_role" {
@@ -511,7 +571,9 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Effect   = "Allow"
         Resource = [
           "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
-          "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+          "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+          "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*"
         ]
       },
       {
@@ -559,9 +621,13 @@ module "bedrock_mcp_lambda" {
   runtime       = var.bedrock_mcp_lambda.runtime
   timeout       = var.bedrock_mcp_lambda.timeout
 
+  # Use archive hash to trigger Lambda code updates deterministically
+  source_code_hash = data.archive_file.bedrock_mcp_zip.output_base64sha256
+
   environment_variables = {
-    # Bedrock Configuration
-    BEDROCK_MODEL_ID                = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    # Bedrock Configuration - Use inference profile ARN for cross-region on-demand access
+    BEDROCK_MODEL_ID                = "arn:aws:bedrock:us-east-1:395402194296:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    BEDROCK_REGION                  = var.bedrock_region
     
     # Logging
     LOG_LEVEL                       = "INFO"
@@ -573,12 +639,49 @@ module "bedrock_mcp_lambda" {
 
   tags = var.tags
 
-  depends_on = [aws_cloudwatch_log_group.bedrock_mcp]
+  depends_on = [
+    aws_cloudwatch_log_group.bedrock_mcp,
+    data.archive_file.bedrock_mcp_zip,
+    null_resource.bedrock_mcp_build
+  ]
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Amazon Lex Bot
-# ---------------------------------------------------------------------------------------------------------------------
+# Amazon Lex Bot Configuration
+# =====================================================================================================================
+# This section creates a multi-locale Lex bot with intent support for both voice and chat channels.
+#
+# BOT STRUCTURE:
+# - Bot: connect-comprehensive-bot
+#   ├── Locale: en_GB (primary)
+#   │   ├── Intent: ChatIntent (created by module, fulfillment enabled)
+#   │   └── Intent: TransferToAgent (explicit, fulfillment disabled - Lambda returns this)
+#   ├── Locale: en_US (secondary)
+#   │   ├── Intent: ChatIntent (explicit, fulfillment enabled)
+#   │   └── Intent: TransferToAgent (explicit, fulfillment disabled - Lambda returns this)
+#   └── Bot Alias: prod (points to latest bot version)
+#       └── Code Hook: Lambda fulfillment for bedrock-mcp
+#
+# DEPLOYMENT FLOW:
+# 1. Create bot and locales (module handles en_GB + ChatIntent)
+# 2. Create en_US locale explicitly
+# 3. Create ChatIntent for en_US
+# 4. Create TransferToAgent intents for both locales
+# 5. Build bot locales (triggers AWS CLI build-bot-locale)
+# 6. Create bot version (captures all intents at point in time)
+# 7. Create bot alias pointing to version
+# 8. Associate with Connect instance
+#
+# CONTACT FLOW:
+# - Flow: BedrockPrimaryFlow (DEFAULT - deployed as the primary contact flow)
+#   - Template: bedrock_primary_flow_fixed.json.tftpl
+#   - Behavior:
+#     * Routes inbound calls to Lex bot (en_GB locale)
+#     * Lambda processes all utterances via Bedrock (Anthropic Claude)
+#     * If Lambda returns TransferToAgent intent → route to agent queue
+#     * Otherwise → continue conversation with bot
+# =====================================================================================================================
+
 # Using the module for the bot shell
 module "lex_bot" {
   source                 = "../resources/lex"
@@ -630,6 +733,36 @@ resource "aws_lexv2models_intent" "chat_en_us" {
   depends_on = [aws_lexv2models_bot_locale.en_us]
 }
 
+# TransferToAgent intent for en_GB - used by Lambda to signal agent handover
+resource "aws_lexv2models_intent" "transfer_to_agent_en_gb" {
+  bot_id      = module.lex_bot.bot_id
+  bot_version = "DRAFT"
+  locale_id   = "en_GB"
+  name        = "TransferToAgent"
+  description = "Intent returned by Lambda to signal agent transfer is needed"
+
+  fulfillment_code_hook {
+    enabled = false
+  }
+
+  depends_on = [module.lex_bot]
+}
+
+# TransferToAgent intent for en_US - used by Lambda to signal agent handover
+resource "aws_lexv2models_intent" "transfer_to_agent_en_us" {
+  bot_id      = module.lex_bot.bot_id
+  bot_version = "DRAFT"
+  locale_id   = "en_US"
+  name        = "TransferToAgent"
+  description = "Intent returned by Lambda to signal agent transfer is needed"
+
+  fulfillment_code_hook {
+    enabled = false
+  }
+
+  depends_on = [aws_lexv2models_bot_locale.en_us]
+}
+
 # Intents are no longer needed - using FallbackIntent only (created by module)
 # The Lex bot now uses a single FallbackIntent that passes all input to Bedrock via Lambda
 # resource "aws_lexv2models_intent" "intents" {
@@ -654,7 +787,8 @@ resource "aws_lambda_permission" "lex_invoke" {
 resource "null_resource" "build_bot_locales" {
   triggers = {
     bot_id = module.lex_bot.bot_id
-    # No intents_hash needed - using FallbackIntent only
+    transfer_intent_gb = aws_lexv2models_intent.transfer_to_agent_en_gb.id
+    transfer_intent_us = aws_lexv2models_intent.transfer_to_agent_en_us.id
   }
 
   provisioner "local-exec" {
@@ -738,13 +872,19 @@ resource "null_resource" "build_bot_locales" {
   }
 
   depends_on = [
-    aws_lexv2models_bot_locale.en_us
+    module.lex_bot,
+    aws_lexv2models_bot_locale.en_us,
+    aws_lexv2models_intent.chat_en_us,
+    aws_lexv2models_intent.transfer_to_agent_en_gb,
+    aws_lexv2models_intent.transfer_to_agent_en_us
   ]
 }
 
 # Create Bot Version AFTER all intents are defined and locales are built
+# This version includes all intents: ChatIntent and TransferToAgent for both locales
 resource "aws_lexv2models_bot_version" "this" {
-  bot_id = module.lex_bot.bot_id
+  bot_id      = module.lex_bot.bot_id
+  description = "Version with ChatIntent and TransferToAgent intents for both locales - ${timestamp()}"
   locale_specification = {
     (var.locale) = {
       source_bot_version = "DRAFT"
@@ -754,8 +894,15 @@ resource "aws_lexv2models_bot_version" "this" {
     }
   }
   depends_on = [
-    null_resource.build_bot_locales
+    null_resource.build_bot_locales,
+    aws_lexv2models_intent.chat_en_us,
+    aws_lexv2models_intent.transfer_to_agent_en_gb,
+    aws_lexv2models_intent.transfer_to_agent_en_us
   ]
+  
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # CloudWatch Log Group for Lex Conversation Logs
@@ -1270,13 +1417,29 @@ resource "aws_connect_contact_flow" "chat_entry" {
   ]
 }
 
-# Bedrock Primary Flow - Simplified flow with input preservation and seamless handover
+# ===== PRIMARY CONTACT FLOW - DEFAULT FOR PHONE NUMBER =====
+# Bedrock Primary Flow - Main contact flow used for all inbound calls
+# This is the DEFAULT FLOW associated with DID and toll-free numbers
+# Template: bedrock_primary_flow_fixed.json.tftpl
+#
+# FLOW LOGIC:
+# 1. Accept inbound call
+# 2. Greet customer: "Hello! Welcome to our banking service..."
+# 3. Connect to Lex bot (en_GB locale) with Lambda fulfillment
+# 4. For each customer input:
+#    - Lex invokes Lambda (bedrock-mcp)
+#    - Lambda sends to Bedrock for AI response
+#    - Lambda returns either:
+#      a) Response text + ChatIntent → continue conversation
+#      b) TransferToAgent intent → transfer to agent queue
+# 5. Agent queue manages customer while waiting
+# =============================================================
 resource "aws_connect_contact_flow" "bedrock_primary" {
   instance_id = module.connect_instance.id
   name        = "BedrockPrimaryFlow"
-  description = "Bedrock-primary architecture with input preservation and seamless agent handover"
+  description = "Bedrock-primary architecture with multi-turn conversation and intelligent agent transfer - PRIMARY FLOW FOR PHONE NUMBERS"
   type        = "CONTACT_FLOW"
-  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow_simple.json.tftpl", {
+  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow_fixed.json.tftpl", {
     lex_bot_alias_arn = awscc_lex_bot_alias.this.arn
     queue_arn         = aws_connect_queue.queues["GeneralAgentQueue"].arn
   })

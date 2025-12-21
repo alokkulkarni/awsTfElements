@@ -5,7 +5,7 @@
     "entryPointPosition": { "x": 20, "y": 20 },
     "snapToGrid": false,
     "name": "BedrockPrimaryFlow",
-    "description": "Bedrock-primary flow with Lex integration",
+    "description": "Bedrock-primary flow with multi-turn conversation and agent transfer support",
     "type": "contactFlow",
     "status": "published"
   },
@@ -34,7 +34,16 @@
             "ErrorType": "NoMatchingError"
           }
         ],
-        "Conditions": []
+        "Conditions": [
+          {
+            "NextAction": "set-queue",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["TransferToAgent"]
+            },
+            "ConditionType": "IntentName"
+          }
+        ]
       }
     },
     {

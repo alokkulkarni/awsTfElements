@@ -54,6 +54,7 @@ class ValidationAgent:
         fabricated_check = self.check_fabricated_data(tool_results, model_response)
         validation_details["checks_performed"].append("fabricated_data")
         if not fabricated_check["passed"]:
+            logger.info(f"Fabricated data check FAILED: {fabricated_check['details']}")
             validation_details["issues_found"].append(fabricated_check)
             validation_details["confidence_score"] *= 0.5
         
@@ -61,6 +62,7 @@ class ValidationAgent:
         domain_check = self.check_domain_boundaries(model_response)
         validation_details["checks_performed"].append("domain_boundary")
         if not domain_check["passed"]:
+            logger.info(f"Domain boundary check FAILED: {domain_check['details']}")
             validation_details["issues_found"].append(domain_check)
             validation_details["confidence_score"] *= 0.7
         
@@ -68,6 +70,7 @@ class ValidationAgent:
         security_check = self.check_security_violations(model_response)
         validation_details["checks_performed"].append("security_violations")
         if not security_check["passed"]:
+            logger.info(f"Security violations check FAILED: {security_check['details']}")
             validation_details["issues_found"].append(security_check)
             validation_details["confidence_score"] *= 0.1  # Severe penalty for security violations
         
@@ -75,6 +78,7 @@ class ValidationAgent:
         isolation_check = self.check_customer_isolation(user_query, model_response)
         validation_details["checks_performed"].append("customer_isolation")
         if not isolation_check["passed"]:
+            logger.info(f"Customer isolation check FAILED: {isolation_check['details']}")
             validation_details["issues_found"].append(isolation_check)
             validation_details["confidence_score"] *= 0.1  # Severe penalty for data isolation violations
         
@@ -100,6 +104,10 @@ class ValidationAgent:
             issue.get("type") in security_violation_types 
             for issue in validation_details["issues_found"]
         )
+        
+        logger.info(f"VALIDATION SUMMARY: {len(validation_details['issues_found'])} issues found")
+        logger.info(f"Issues: {[issue.get('type') for issue in validation_details['issues_found']]}")
+        logger.info(f"Confidence score: {validation_details['confidence_score']}")
         
         if len(validation_details["issues_found"]) == 0:
             validation_details["severity"] = "none"
@@ -176,10 +184,17 @@ class ValidationAgent:
         """Ensure response stays within banking service domain."""
         response_lower = model_response.lower()
         
-        # Topics that are out of scope
+        # Topics that are out of scope - use multi-word phrases to avoid false positives
+        # e.g., "credit card application" not just "card"
         off_topic_keywords = [
-            'mortgage', 'loan application', 'credit card', 'investment', 'stocks',
-            'insurance', 'pension', 'cryptocurrency', 'forex', 'trading'
+            'mortgage application', 'mortgage advice', 'apply for a mortgage',
+            'loan application', 'personal loan', 'business loan',
+            'credit card application', 'apply for credit card', 'new credit card',
+            'investment advice', 'invest in stocks', 'stock market',
+            'insurance policy', 'insurance claim', 'life insurance',
+            'pension plan', 'retirement pension',
+            'cryptocurrency', 'bitcoin', 'ethereum',
+            'forex trading', 'currency trading', 'day trading'
         ]
         
         off_topic_found = []
@@ -198,34 +213,23 @@ class ValidationAgent:
         """Check for disclosure of internal system information or technical details."""
         response_lower = model_response.lower()
         
-        # Keywords that indicate internal system disclosure
-        internal_keywords = [
-            'system prompt', 'internal working', 'lambda function', 'bedrock', 'aws',
-            'configuration', 'prompt', 'tool definition', 'mcp server', 'validation agent',
-            'algorithm', 'model', 'claude', 'anthropic', 'api', 'database', 'dynamodb',
-            'cloudwatch', 'terraform', 'infrastructure', 'deployment', 'code', 'python',
-            'json', 'schema', 'endpoint', 'service', 'architecture', 'implementation'
-        ]
-        
-        # Phrases that indicate system disclosure attempts
-        disclosure_phrases = [
-            'how do you work', 'what are your instructions', 'show me your prompt',
-            'what tools do you have', 'how are you configured', 'what is your system',
-            'reveal your', 'tell me about your', 'explain your architecture',
-            'what model are you', 'how were you built', 'show me the code'
+        # Multi-word phrases that specifically indicate internal system disclosure
+        internal_phrases = [
+            'system prompt', 'internal working', 'lambda function', 'bedrock model',
+            'aws service', 'tool definition', 'mcp server', 'validation agent',
+            'anthropic claude', 'api endpoint', 'dynamodb table', 'cloudwatch logs',
+            'terraform configuration', 'code implementation', 'python code',
+            'json schema', 'inference profile', 'system architecture',
+            'how i work', 'how i am configured', 'my instructions',
+            'my system prompt', 'my internal', 'my code', 'my architecture'
         ]
         
         violations_found = []
         
-        # Check for internal keywords
-        for keyword in internal_keywords:
-            if keyword in response_lower:
-                violations_found.append(f"Internal keyword: '{keyword}'")
-        
-        # Check for disclosure phrases
-        for phrase in disclosure_phrases:
+        # Check for internal phrases (multi-word)
+        for phrase in internal_phrases:
             if phrase in response_lower:
-                violations_found.append(f"Disclosure phrase: '{phrase}'")
+                violations_found.append(f"Internal phrase: '{phrase}'")
         
         passed = len(violations_found) == 0
         return {
@@ -239,12 +243,16 @@ class ValidationAgent:
         response_lower = model_response.lower()
         query_lower = user_query.lower()
         
-        # Indicators of customer data leakage
+        # Indicators of customer data leakage - use specific multi-word phrases
         customer_leak_indicators = [
             'other customer', 'another customer', 'previous customer', 'different customer',
-            'customer john', 'customer mary', 'customer smith', 'mr. ', 'mrs. ', 'ms. ',
-            'account number', 'sort code', 'balance of', 'transaction history',
-            'other account', 'different account', 'someone else', 'another person'
+            'customer john', 'customer mary', 'customer smith', 
+            "mr. john", "mrs. smith", "ms. jones",  # Specific name references
+            'account number is', 'your account number is', 'their account number',
+            'sort code is', 'their sort code', 'balance is £',
+            'transaction history shows', 'recent transactions include',
+            'other account holder', 'different account holder', 
+            "someone else's account", 'another person account'
         ]
         
         # Check if response mentions other customers or accounts
@@ -256,14 +264,14 @@ class ValidationAgent:
         # Check for specific patterns that might indicate data leakage
         import re
         
-        # Account numbers (8 digits)
-        account_pattern = r'\b\d{8}\b'
-        if re.search(account_pattern, model_response):
+        # Account numbers (8 digits) - but not phone numbers or other common numbers
+        account_pattern = r'account number[:\s]+\d{8}\b'
+        if re.search(account_pattern, model_response.lower()):
             violations_found.append("Potential account number disclosed")
         
         # Sort codes (XX-XX-XX format)
-        sort_code_pattern = r'\b\d{2}-\d{2}-\d{2}\b'
-        if re.search(sort_code_pattern, model_response):
+        sort_code_pattern = r'sort code[:\s]+\d{2}-\d{2}-\d{2}\b'
+        if re.search(sort_code_pattern, model_response.lower()):
             violations_found.append("Potential sort code disclosed")
         
         # Names that weren't in the user query
@@ -271,8 +279,20 @@ class ValidationAgent:
         response_names = re.findall(name_pattern, model_response)
         query_names = re.findall(name_pattern, user_query)
         
+        # Whitelist of legitimate banking terms that look like names but aren't
+        banking_terms = [
+            'Account Opening', 'Debit Card', 'Customer Service',
+            'Branch Opening', 'Digital Opening', 'Mobile Banking',
+            'National Insurance', 'Insurance Number', 'Photo Id',
+            'Government Issued', 'Proof Address', 'Initial Deposit',
+            'Business Hours', 'Working Days', 'Mobile App',
+            'Bank Transfer', 'Video Verification', 'Biometric Verification',
+            'Mobile Device', 'Physical Card', 'Instant Access',
+            'Digital Access', 'Mobile Number', 'Banking Specialist'
+        ]
+        
         for name in response_names:
-            if name not in query_names and name not in ['Account Opening', 'Debit Card', 'Customer Service']:
+            if name not in query_names and name not in banking_terms:
                 violations_found.append(f"Unauthorized name reference: '{name}'")
         
         passed = len(violations_found) == 0

@@ -84,6 +84,12 @@ variable "bedrock_mcp_lambda" {
   }
 }
 
+variable "bedrock_region" {
+  description = "AWS region to call Bedrock runtime in (must support selected model)"
+  type        = string
+  default     = "us-east-1"
+}
+
 # Deprecated variables removed - no longer needed in Bedrock-primary architecture
 # - lex_fallback_lambda (replaced by bedrock_mcp_lambda)
 # - enable_voice_id (not used in new architecture)

@@ -27,7 +27,7 @@ override.tf.json
 # !example_override.tf
 
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
-# example: *tfplan*
+*tfplan*
 
 # Ignore CLI configuration files
 .terraformrc
@@ -56,8 +56,30 @@ Thumbs.db
 # Lambda deployment packages
 **/*.zip
 
+# Lambda build directories and artifacts
+**/.lambda_build/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+.eggs/
+
 # Chat test environment
 **/chat_test/.env
 **/chat_test/npm-debug.log*
 **/chat_test/yarn-debug.log*
 **/chat_test/yarn-error.log*
+
+# Temporary test and validation files
+**/test_event.json
+**/response.json
+**/payload.json
+**/out.json
+
+# Deployment status and verification files (generated during runs)
+DEPLOYMENT_STATUS.txt
+DEPLOYMENT_STATUS_FINAL.txt
+DEPLOYMENT_STATUS.md
+DEPLOYMENT_SUMMARY.md
+CHANGES_SUMMARY.md
+DEPLOYMENT_CONFIRMATION.md
