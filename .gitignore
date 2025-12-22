@@ -55,6 +55,8 @@ Thumbs.db
 
 # Lambda deployment packages
 **/*.zip
+**/lambda/**/package/
+**/lambda/**/*.zip
 
 # Lambda build directories and artifacts
 **/.lambda_build/
@@ -63,6 +65,8 @@ Thumbs.db
 **/*.pyo
 **/*.egg-info/
 .eggs/
+**/.pytest_cache/
+**/*.dist-info/
 
 # Chat test environment
 **/chat_test/.env

@@ -1,5 +1,5 @@
 """
-Lambda function that uses Bedrock with FastMCP 2.0 for primary intent classification
+Lambda function that uses Bedrock for primary intent classification
 and tool-based fulfillment for banking services (account opening and debit card orders).
 """
 import sys
