@@ -25,6 +25,16 @@
           "y": 65.6
         }
       },
+      "set-conversation-context": {
+        "position": {
+          "x": 410.4,
+          "y": 246.0
+        },
+        "dynamicMetadata": {
+          "$.Attributes.conversation_summary": true,
+          "$.Attributes.handover_reason": true
+        }
+      },
       "set-queue": {
         "position": {
           "x": 411.2,
@@ -97,7 +107,28 @@
       "Identifier": "error-handler",
       "Type": "MessageParticipant",
       "Transitions": {
-        "NextAction": "set-queue"
+        "NextAction": "set-conversation-context"
+      }
+    },
+    {
+      "Parameters": {
+        "Attributes": {
+          "ConversationSummary": "$.Attributes.conversation_summary",
+          "HandoverReason": "$.Attributes.handover_reason",
+          "LexIntent": "$.Attributes.lex.intent",
+          "CustomerContext": "Transferred from AI assistant"
+        }
+      },
+      "Identifier": "set-conversation-context",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "set-queue",
+        "Errors": [
+          {
+            "NextAction": "set-queue",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
       }
     },
     {
@@ -132,7 +163,7 @@
         "NextAction": "connect-to-lex",
         "Conditions": [
           {
-            "NextAction": "set-queue",
+            "NextAction": "set-conversation-context",
             "Condition": {
               "Operator": "Equals",
               "Operands": [

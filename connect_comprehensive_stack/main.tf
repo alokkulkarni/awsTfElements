@@ -143,6 +143,24 @@ resource "aws_connect_instance_storage_config" "call_recordings" {
   }
 }
 
+# Contact Lens Real-Time Call Transcripts
+resource "aws_connect_instance_storage_config" "contact_lens_transcripts" {
+  instance_id   = module.connect_instance.id
+  resource_type = "REAL_TIME_CONTACT_ANALYSIS_SEGMENTS"
+
+  storage_config {
+    s3_config {
+      bucket_name   = module.connect_storage_bucket.id
+      bucket_prefix = "contact-lens-transcripts"
+      encryption_config {
+        encryption_type = "KMS"
+        key_id          = module.kms_key.arn
+      }
+    }
+    storage_type = "S3"
+  }
+}
+
 # Contact Trace Records storage not supported for this instance type
 # resource "aws_connect_instance_storage_config" "contact_trace_records" {
 #   instance_id   = module.connect_instance.id
@@ -360,6 +378,19 @@ module "hallucination_logs_table" {
   tags               = var.tags
   
   # Note: GSI not supported by module - can be added manually if needed for querying by hallucination_type
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# DynamoDB for Conversation History
+# ---------------------------------------------------------------------------------------------------------------------
+module "conversation_history_table" {
+  source             = "../resources/dynamodb"
+  name               = "${var.project_name}-conversation-history"
+  hash_key           = "caller_id"           # Customer phone number
+  range_key          = "timestamp"           # Conversation turn timestamp
+  ttl_enabled        = true
+  ttl_attribute_name = "ttl"                 # Auto-expire after 90 days
+  tags               = var.tags
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -590,6 +621,20 @@ resource "aws_iam_role_policy" "lambda_policy" {
       },
       {
         Action = [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:BatchWriteItem"
+        ]
+        Effect = "Allow"
+        Resource = [
+          module.conversation_history_table.arn
+        ]
+      },
+      {
+        Action = [
           "cloudwatch:PutMetricData"
         ]
         Effect   = "Allow"
@@ -620,6 +665,9 @@ module "bedrock_mcp_lambda" {
   handler       = var.bedrock_mcp_lambda.handler
   runtime       = var.bedrock_mcp_lambda.runtime
   timeout       = var.bedrock_mcp_lambda.timeout
+  memory_size   = 1024
+  architectures = ["arm64"]
+  publish       = true
 
   # Use archive hash to trigger Lambda code updates deterministically
   source_code_hash = data.archive_file.bedrock_mcp_zip.output_base64sha256
@@ -635,6 +683,9 @@ module "bedrock_mcp_lambda" {
     # Hallucination Detection
     ENABLE_HALLUCINATION_DETECTION  = "true"
     HALLUCINATION_TABLE_NAME        = module.hallucination_logs_table.name
+    
+    # Conversation History
+    CONVERSATION_HISTORY_TABLE_NAME = module.conversation_history_table.name
   }
 
   tags = var.tags
@@ -644,6 +695,22 @@ module "bedrock_mcp_lambda" {
     data.archive_file.bedrock_mcp_zip,
     null_resource.bedrock_mcp_build
   ]
+}
+
+# Alias and Provisioned Concurrency for Bedrock MCP Lambda
+resource "aws_lambda_alias" "bedrock_mcp_live" {
+  name             = "live"
+  description      = "Live alias for provisioned concurrency"
+  function_name    = module.bedrock_mcp_lambda.function_name
+  function_version = module.bedrock_mcp_lambda.version
+}
+
+resource "aws_lambda_provisioned_concurrency_config" "bedrock_mcp_pc" {
+  function_name                     = module.bedrock_mcp_lambda.function_name
+  qualifier                         = aws_lambda_alias.bedrock_mcp_live.name
+  provisioned_concurrent_executions = 2
+
+  depends_on = [aws_lambda_alias.bedrock_mcp_live]
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -686,7 +753,7 @@ module "bedrock_mcp_lambda" {
 module "lex_bot" {
   source                 = "../resources/lex"
   bot_name               = "${var.project_name}-bot"
-  fulfillment_lambda_arn = module.bedrock_mcp_lambda.arn
+  fulfillment_lambda_arn = aws_lambda_alias.bedrock_mcp_live.arn
   locale                 = var.locale
   voice_id               = var.voice_id
   tags                   = var.tags
@@ -801,7 +868,7 @@ resource "aws_lexv2models_intent" "transfer_to_agent_en_us" {
 resource "aws_lambda_permission" "lex_invoke" {
   statement_id  = "AllowLexInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = module.bedrock_mcp_lambda.function_name
+  function_name = aws_lambda_alias.bedrock_mcp_live.arn
   principal     = "lexv2.amazonaws.com"
   source_arn    = "arn:aws:lex:${data.aws_caller_identity.current.id == data.aws_caller_identity.current.id ? "eu-west-2" : ""}:${data.aws_caller_identity.current.account_id}:bot-alias/${module.lex_bot.bot_id}/*"
 }
@@ -993,7 +1060,7 @@ resource "awscc_lex_bot_alias" "this" {
         enabled = true
         code_hook_specification = {
           lambda_code_hook = {
-            lambda_arn = module.bedrock_mcp_lambda.arn
+            lambda_arn = aws_lambda_alias.bedrock_mcp_live.arn
             code_hook_interface_version = "1.0"
           }
         }
@@ -1005,7 +1072,7 @@ resource "awscc_lex_bot_alias" "this" {
         enabled = true
         code_hook_specification = {
           lambda_code_hook = {
-            lambda_arn = module.bedrock_mcp_lambda.arn
+            lambda_arn = aws_lambda_alias.bedrock_mcp_live.arn
             code_hook_interface_version = "1.0"
           }
         }
@@ -1084,9 +1151,9 @@ resource "null_resource" "validate_bot_alias" {
           exit 1
         fi
         
-        if [ "$LAMBDA_ARN" != "${module.bedrock_mcp_lambda.arn}" ]; then
+        if [ "$LAMBDA_ARN" != "${aws_lambda_alias.bedrock_mcp_live.arn}" ]; then
           echo "❌ Locale $LOCALE Lambda ARN mismatch"
-          echo "   Expected: ${module.bedrock_mcp_lambda.arn}"
+          echo "   Expected: ${aws_lambda_alias.bedrock_mcp_live.arn}"
           echo "   Found: $LAMBDA_ARN"
           exit 1
         fi
