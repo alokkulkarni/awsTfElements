@@ -354,6 +354,54 @@ resource "aws_connect_user" "agent_main" {
   tags = var.tags
 }
 
+# Agent 3 - Non-admin, main routing profile
+resource "aws_connect_user" "agent3" {
+  instance_id        = module.connect_instance.id
+  name               = "agent3"
+  password           = "Password123!"
+  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
+  security_profile_ids = [
+    data.aws_connect_security_profile.agent.security_profile_id
+  ]
+
+  identity_info {
+    first_name = "Agent"
+    last_name  = "Three"
+    email      = "agent3@example.com"
+  }
+
+  phone_config {
+    phone_type  = "SOFT_PHONE"
+    auto_accept = true
+  }
+
+  tags = var.tags
+}
+
+# Agent 4 - Non-admin, main routing profile
+resource "aws_connect_user" "agent4" {
+  instance_id        = module.connect_instance.id
+  name               = "agent4"
+  password           = "Password123!"
+  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
+  security_profile_ids = [
+    data.aws_connect_security_profile.agent.security_profile_id
+  ]
+
+  identity_info {
+    first_name = "Agent"
+    last_name  = "Four"
+    email      = "agent4@example.com"
+  }
+
+  phone_config {
+    phone_type  = "SOFT_PHONE"
+    auto_accept = true
+  }
+
+  tags = var.tags
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # DynamoDB for New Intent Logging
 # ---------------------------------------------------------------------------------------------------------------------
@@ -415,6 +463,13 @@ data "archive_file" "callback_zip" {
   output_path = "${path.module}/lambda/callback_handler.zip"
 }
 
+# Callback dispatcher Lambda (claim/complete + optional outbound + task creation)
+data "archive_file" "callback_dispatcher_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/callback_dispatcher"
+  output_path = "${path.module}/lambda/callback_dispatcher.zip"
+}
+
 resource "aws_iam_role" "callback_lambda_role" {
   name = "${var.project_name}-callback-lambda-role"
 
@@ -471,6 +526,82 @@ module "callback_lambda" {
   environment_variables = {
     CALLBACK_TABLE_NAME = module.callback_table.name
     LOG_LEVEL           = "INFO"
+  }
+
+  tags = var.tags
+}
+
+# IAM for callback dispatcher
+resource "aws_iam_role" "callback_dispatcher_role" {
+  name = "${var.project_name}-callback-dispatcher-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "callback_dispatcher_policy" {
+  name = "${var.project_name}-callback-dispatcher-policy"
+  role = aws_iam_role.callback_dispatcher_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem"
+        ]
+        Effect   = "Allow"
+        Resource = module.callback_table.arn
+      },
+      {
+        Action = [
+          "connect:StartOutboundVoiceContact",
+          "connect:StartTaskContact"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+module "callback_dispatcher" {
+  source        = "../resources/lambda"
+  filename      = data.archive_file.callback_dispatcher_zip.output_path
+  function_name = "${var.project_name}-callback-dispatcher"
+  role_arn      = aws_iam_role.callback_dispatcher_role.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 20
+
+  environment_variables = {
+    CALLBACK_TABLE_NAME         = module.callback_table.name
+    INSTANCE_ID                 = module.connect_instance.id
+    OUTBOUND_QUEUE_ID           = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+    OUTBOUND_CONTACT_FLOW_ID    = aws_connect_contact_flow.bedrock_primary.contact_flow_id
+    OUTBOUND_SOURCE_PHONE       = aws_connect_phone_number.outbound.phone_number
+    TASK_CONTACT_FLOW_ID        = aws_connect_contact_flow.callback_task.contact_flow_id
+    LOG_LEVEL                   = "INFO"
   }
 
   tags = var.tags
@@ -1547,10 +1678,22 @@ resource "aws_connect_contact_flow" "customer_queue" {
   name        = "CustomerQueueFlow"
   description = "Simple queue flow with hold messages"
   type        = "CUSTOMER_QUEUE"
-  content = templatefile("${path.module}/contact_flows/customer_queue_flow_minimal.json.tftpl", {})
+  content = templatefile("${path.module}/contact_flows/customer_queue_flow.json.tftpl", {
+    callback_lambda_arn = module.callback_lambda.arn
+  })
   tags = var.tags
 
   depends_on = []
+}
+
+# Task flow to surface claimed callbacks as Connect tasks
+resource "aws_connect_contact_flow" "callback_task" {
+  instance_id = module.connect_instance.id
+  name        = "CallbackTaskFlow"
+  description = "Task flow for claimed callbacks"
+  type        = "CONTACT_FLOW"
+  content     = templatefile("${path.module}/contact_flows/callback_task_flow.json.tftpl", {})
+  tags        = var.tags
 }
 
 # Associate Lex Bot with Connect Instance

@@ -1,6 +1,6 @@
 {
   "Version": "2019-10-30",
-  "StartAction": "connect-to-lex",
+  "StartAction": "set-caller-id",
   "Metadata": {
     "entryPointPosition": {
       "x": 20,
@@ -76,6 +76,25 @@
     "hash": {}
   },
   "Actions": [
+    {
+      "Identifier": "set-caller-id",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "customer_number": "$.SystemEndpoint.Address",
+          "customerPhoneNumber": "$.SystemEndpoint.Address"
+        }
+      },
+      "Transitions": {
+        "NextAction": "connect-to-lex",
+        "Errors": [
+          {
+            "NextAction": "connect-to-lex",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
     {
       "Parameters": {},
       "Identifier": "disconnect",
