@@ -1,0 +1,24 @@
+# Global code owner
+* @alokkulkarni
+
+# Terraform infrastructure
+*.tf @alokkulkarni
+terraform/ @alokkulkarni
+
+# Lambda functions
+lambda/ @alokkulkarni
+
+# Documentation and configuration
+*.md @alokkulkarni
+*.json @alokkulkarni
+*.yaml @alokkulkarni
+*.yml @alokkulkarni
+
+# AWS Connect resources
+connect_comprehensive_stack/ @alokkulkarni
+connect_nova_sonic_hybrid/ @alokkulkarni
+connect_lex_chatbot/ @alokkulkarni
+
+# Scripts
+scripts/ @alokkulkarni
+*.sh @alokkulkarni
