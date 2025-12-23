@@ -1230,6 +1230,24 @@ def lambda_handler(event, context):
             if is_first_message:
                 logger.info("Empty input on first message - introducing Emma Thompson")
                 response_text = "Hello! This is Emma Thompson from the branch helpline. I'm here to help! How may I assist you today?"
+                
+                # Save the Emma Thompson introduction to conversation history
+                # so next message doesn't re-introduce
+                # Save user's silence first
+                save_conversation_turn(
+                    session_id=session_id,
+                    role="user",
+                    content="[silence]",
+                    caller_id=caller_id
+                )
+                # Then save Emma's introduction
+                save_conversation_turn(
+                    session_id=session_id,
+                    role="assistant",
+                    content=response_text,
+                    caller_id=caller_id
+                )
+                logger.info("Saved Emma Thompson introduction to conversation history")
             else:
                 logger.info("Empty input detected (silence timeout), prompting user")
                 response_text = "I'm still here to help! What would you like assistance with?"
