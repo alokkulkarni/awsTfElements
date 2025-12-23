@@ -1492,6 +1492,46 @@ resource "aws_connect_queue" "queues" {
   }
 }
 
+# Associate customer queue flow with GeneralAgentQueue
+# Note: Terraform AWS provider doesn't support default_customer_queue_flow_id parameter yet
+# Using null_resource with AWS CLI to set the association
+resource "null_resource" "associate_customer_queue_flow" {
+  triggers = {
+    queue_id       = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+    queue_flow_id  = aws_connect_contact_flow.customer_queue.contact_flow_id
+    instance_id    = module.connect_instance.id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Get the current queue configuration
+      INSTANCE_ID="${module.connect_instance.id}"
+      QUEUE_ID="${aws_connect_queue.queues["GeneralAgentQueue"].queue_id}"
+      QUEUE_FLOW_ARN="${aws_connect_contact_flow.customer_queue.arn}"
+      
+      echo "Associating customer queue flow with GeneralAgentQueue..."
+      echo "Instance ID: $INSTANCE_ID"
+      echo "Queue ID: $QUEUE_ID"
+      echo "Queue Flow ARN: $QUEUE_FLOW_ARN"
+      
+      # Use AWS API to associate the flow
+      aws connect associate-flow \
+        --instance-id "$INSTANCE_ID" \
+        --resource-id "$QUEUE_ID" \
+        --flow-id "${aws_connect_contact_flow.customer_queue.contact_flow_id}" \
+        --resource-type QUEUE \
+        --region ${var.region}
+      
+      echo "Customer queue flow associated successfully"
+    EOT
+  }
+
+  depends_on = [
+    aws_connect_queue.queues,
+    aws_connect_contact_flow.customer_queue
+  ]
+}
+
 # Note: The connect module might not output hours_of_operation_id. 
 # If not, we need a data source to find the default one.
 
@@ -1844,9 +1884,11 @@ resource "aws_connect_contact_flow" "bedrock_primary" {
 resource "aws_connect_contact_flow" "customer_queue" {
   instance_id = module.connect_instance.id
   name        = "CustomerQueueFlow"
-  description = "Simple queue flow with hold messages"
+  description = "Queue flow with position updates, callback option, and hold music"
   type        = "CUSTOMER_QUEUE"
-  content = templatefile("${path.module}/contact_flows/customer_queue_flow_minimal.json.tftpl", {})
+  content = templatefile("${path.module}/contact_flows/customer_queue_flow.json.tftpl", {
+    callback_lambda_arn = module.callback_lambda.arn
+  })
   tags = var.tags
 
   depends_on = []
