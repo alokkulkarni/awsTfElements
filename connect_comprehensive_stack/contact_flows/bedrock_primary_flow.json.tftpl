@@ -3,20 +3,14 @@
   "StartAction": "set-caller-id",
   "Metadata": {
     "entryPointPosition": {
-      "x": -217.6,
-      "y": -124.8
+      "x": -472.8,
+      "y": -234.4
     },
     "ActionMetadata": {
       "disconnect": {
         "position": {
           "x": 1342.4,
           "y": 815.2
-        }
-      },
-      "set-queue": {
-        "position": {
-          "x": 790.4,
-          "y": 532
         }
       },
       "transfer-to-agent": {
@@ -27,43 +21,54 @@
       },
       "set-caller-id": {
         "position": {
-          "x": -112,
-          "y": -74.4
+          "x": -367.2,
+          "y": -203.2
         },
         "dynamicParams": []
       },
-      "error-handler": {
+      "InitialGreeting": {
         "position": {
-          "x": 341.6,
-          "y": 222.4
+          "x": -110.4,
+          "y": -97.6
+        },
+        "isFriendlyName": true
+      },
+      "set-queue": {
+        "position": {
+          "x": 790.4,
+          "y": 532
         }
       },
       "set-conversation-context": {
         "position": {
-          "x": 580.8,
-          "y": 293.6
+          "x": 597.6,
+          "y": 257.6
         },
         "dynamicParams": []
       },
       "connect-to-lex": {
         "position": {
-          "x": 120.8,
-          "y": 43.2
+          "x": 120,
+          "y": 42.4
         },
         "parameters": {
+          "PromptId": {
+            "displayName": "Beep.wav"
+          },
           "LexV2Bot": {
             "AliasArn": {
               "lexV2BotName": ""
             }
           }
         },
+        "promptName": "Beep.wav",
         "dynamicMetadata": {
           "x-amz-lex:audio:start-timeout-ms": false
         },
         "lexV2BotName": "",
         "conditionMetadata": [
           {
-            "id": "50a7334b-c801-4bef-82a0-18198fb20228",
+            "id": "cfc9c064-a1b5-4ca5-951f-e84d1352207e",
             "operator": {
               "name": "Equals",
               "value": "Equals",
@@ -72,6 +77,18 @@
             "value": "TransferToAgent"
           }
         ]
+      },
+      "error-handler": {
+        "position": {
+          "x": 341.6,
+          "y": 222.4
+        },
+        "parameters": {
+          "PromptId": {
+            "displayName": "Beep.wav"
+          }
+        },
+        "promptName": "Beep.wav"
       }
     },
     "Annotations": [],
@@ -90,31 +107,16 @@
     },
     {
       "Parameters": {
-        "QueueId": "${queue_arn}"
+        "RetryDelaySeconds": "120",
+        "InitialCallDelaySeconds": "30",
+        "MaximumConnectionAttempts": "1",
+        "CallbackMode": "AgentFirst"
       },
-      "Identifier": "set-queue",
-      "Type": "UpdateContactTargetQueue",
-      "Transitions": {
-        "NextAction": "transfer-to-agent",
-        "Errors": [
-          {
-            "NextAction": "disconnect",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
-    },
-    {
-      "Parameters": {},
       "Identifier": "transfer-to-agent",
-      "Type": "TransferContactToQueue",
+      "Type": "CreateCallbackContact",
       "Transitions": {
         "NextAction": "disconnect",
         "Errors": [
-          {
-            "NextAction": "disconnect",
-            "ErrorType": "QueueAtCapacity"
-          },
           {
             "NextAction": "disconnect",
             "ErrorType": "NoMatchingError"
@@ -132,6 +134,22 @@
       "Identifier": "set-caller-id",
       "Type": "UpdateContactAttributes",
       "Transitions": {
+        "NextAction": "InitialGreeting",
+        "Errors": [
+          {
+            "NextAction": "InitialGreeting",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Text": "Hello! Welcome to our banking service. Please note that calls might be recorded for quality and training purposes. Let me transfer you to one of our agents who will be able to assist you with your banking queries?"
+      },
+      "Identifier": "InitialGreeting",
+      "Type": "MessageParticipant",
+      "Transitions": {
         "NextAction": "connect-to-lex",
         "Errors": [
           {
@@ -143,15 +161,15 @@
     },
     {
       "Parameters": {
-        "Text": "One moment please."
+        "QueueId": "${queue_arn}"
       },
-      "Identifier": "error-handler",
-      "Type": "MessageParticipant",
+      "Identifier": "set-queue",
+      "Type": "UpdateContactTargetQueue",
       "Transitions": {
-        "NextAction": "set-conversation-context",
+        "NextAction": "transfer-to-agent",
         "Errors": [
           {
-            "NextAction": "set-queue",
+            "NextAction": "disconnect",
             "ErrorType": "NoMatchingError"
           }
         ]
@@ -160,9 +178,9 @@
     {
       "Parameters": {
         "Attributes": {
-          "ConversationSummary": "$.Lex.SessionAttributes.conversation_summary",
-          "HandoverReason": "$.Lex.SessionAttributes.handover_reason",
-          "LexIntent": "$.Lex.IntentName",
+          "ConversationSummary": "$.Attributes.conversation_summary",
+          "HandoverReason": "$.Attributes.handover_reason",
+          "LexIntent": "$.Attributes.lex_intent",
           "CustomerContext": "Transferred from AI assistant - Emma Thompson"
         }
       },
@@ -180,7 +198,7 @@
     },
     {
       "Parameters": {
-        "Text": "Hello! Welcome to our banking service. I can help you with opening accounts, ordering debit cards and provide nearest branch information. How can I assist you today?",
+        "PromptId": "${beep_prompt_arn}",
         "LexV2Bot": {
           "AliasArn": "${lex_bot_alias_arn}"
         },
@@ -210,6 +228,22 @@
           },
           {
             "NextAction": "error-handler",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "PromptId": "${beep_prompt_arn}"
+      },
+      "Identifier": "error-handler",
+      "Type": "MessageParticipant",
+      "Transitions": {
+        "NextAction": "set-conversation-context",
+        "Errors": [
+          {
+            "NextAction": "set-queue",
             "ErrorType": "NoMatchingError"
           }
         ]

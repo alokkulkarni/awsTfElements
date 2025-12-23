@@ -1168,7 +1168,8 @@ def initiate_agent_handover(conversation_history: List[Dict], handover_reason: s
             },
             "sessionAttributes": {
                 "conversation_summary": json.dumps(conversation_summary),
-                "handover_reason": handover_reason
+                "handover_reason": handover_reason,
+                "lex_intent": "TransferToAgent"
             }
         },
         "messages": [
@@ -1247,6 +1248,8 @@ def lambda_handler(event, context):
                     content=response_text,
                     caller_id=caller_id
                 )
+                # Invalidate cache so next message sees the updated history
+                invalidate_conversation_cache(session_id)
                 logger.info("Saved Emma Thompson introduction to conversation history")
             else:
                 logger.info("Empty input detected (silence timeout), prompting user")
@@ -1478,7 +1481,9 @@ def lambda_handler(event, context):
                     "state": "Fulfilled"
                 },
                 "sessionAttributes": {
+                    "conversation_summary": "Technical error occurred during conversation",
                     "handover_reason": "technical_error",
+                    "lex_intent": "TransferToAgent",
                     "error_details": str(e)
                 }
             },

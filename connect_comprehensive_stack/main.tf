@@ -175,6 +175,12 @@ data "aws_connect_security_profile" "admin" {
   name        = "Admin"
 }
 
+# Data source for the default Beep.wav prompt
+data "aws_connect_prompt" "beep" {
+  instance_id = module.connect_instance.id
+  name        = "Beep"
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Routing Profiles
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1823,12 +1829,14 @@ resource "aws_connect_contact_flow" "bedrock_primary" {
   content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
     lex_bot_alias_arn = awscc_lex_bot_alias.this.arn
     queue_arn         = aws_connect_queue.queues["GeneralAgentQueue"].arn
+    beep_prompt_arn   = data.aws_connect_prompt.beep.arn
   })
   tags = var.tags
 
   depends_on = [
     awscc_lex_bot_alias.this,
-    aws_connect_queue.queues
+    aws_connect_queue.queues,
+    data.aws_connect_prompt.beep
   ]
 }
 
