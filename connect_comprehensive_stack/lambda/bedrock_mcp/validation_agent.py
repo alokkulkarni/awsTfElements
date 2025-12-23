@@ -281,14 +281,20 @@ class ValidationAgent:
         
         # Whitelist of legitimate banking terms that look like names but aren't
         banking_terms = [
-            'Account Opening', 'Debit Card', 'Customer Service',
+            'Account Opening', 'Open Account', 'Debit Card', 'Customer Service',
             'Branch Opening', 'Digital Opening', 'Mobile Banking',
-            'National Insurance', 'Insurance Number', 'Photo Id',
+            'National Insurance', 'Insurance Number', 'Your National', 'Photo Id',
             'Government Issued', 'Proof Address', 'Initial Deposit',
             'Business Hours', 'Working Days', 'Mobile App',
             'Bank Transfer', 'Video Verification', 'Biometric Verification',
             'Mobile Device', 'Physical Card', 'Instant Access',
-            'Digital Access', 'Mobile Number', 'Banking Specialist'
+            'Digital Access', 'Mobile Number', 'Banking Specialist',
+            'Utility Bill', 'Bank Statement', 'Checking Account', 'Savings Account',
+            'Required Documents', 'Account Types', 'Student Account', 'Business Account',
+            'Online Banking', 'Mobile Banking', 'Digital Process', 'Branch Location',
+            'Application Form', 'Account Details', 'Debit Card Options',
+            'For Branch', 'For Digital', 'Compared To',
+            'Emma Thompson'  # Bot persona name
         ]
         
         for name in response_names:

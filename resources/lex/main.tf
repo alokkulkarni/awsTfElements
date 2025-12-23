@@ -89,6 +89,7 @@ resource "aws_lexv2models_intent" "chat" {
 }
 
 resource "aws_lexv2models_intent" "fallback" {
+  count                  = 0  # existing FallbackIntent already present; skip creation to avoid conflicts
   bot_id                  = aws_lexv2models_bot.this.id
   bot_version             = "DRAFT"
   locale_id               = aws_lexv2models_bot_locale.this.locale_id
@@ -101,6 +102,10 @@ resource "aws_lexv2models_intent" "fallback" {
 
   dialog_code_hook {
     enabled = true
+  }
+
+  lifecycle {
+    ignore_changes = [name]
   }
 }
 

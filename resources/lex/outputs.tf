@@ -15,3 +15,11 @@ output "bot_arn" {
 output "locale_id" {
   value = aws_lexv2models_bot_locale.this.locale_id
 }
+
+output "bot_locale_id" {
+  value = aws_lexv2models_bot_locale.this.id
+}
+
+output "chat_intent_id" {
+  value = aws_lexv2models_intent.chat.id
+}

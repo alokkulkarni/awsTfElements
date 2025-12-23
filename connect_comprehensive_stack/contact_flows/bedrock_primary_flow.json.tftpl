@@ -3,61 +3,67 @@
   "StartAction": "set-caller-id",
   "Metadata": {
     "entryPointPosition": {
-      "x": 20,
-      "y": 20
+      "x": -217.6,
+      "y": -124.8
     },
     "ActionMetadata": {
       "disconnect": {
         "position": {
-          "x": 973.6,
-          "y": 313.6
-        }
-      },
-      "transfer-to-agent": {
-        "position": {
-          "x": 708.8,
-          "y": 353.6
-        }
-      },
-      "error-handler": {
-        "position": {
-          "x": 410.4,
-          "y": 65.6
-        }
-      },
-      "set-conversation-context": {
-        "position": {
-          "x": 410.4,
-          "y": 246.0
-        },
-        "dynamicMetadata": {
-          "$.Attributes.conversation_summary": true,
-          "$.Attributes.handover_reason": true
+          "x": 1342.4,
+          "y": 815.2
         }
       },
       "set-queue": {
         "position": {
-          "x": 411.2,
-          "y": 428
+          "x": 790.4,
+          "y": 532
         }
+      },
+      "transfer-to-agent": {
+        "position": {
+          "x": 1029.6,
+          "y": 662.4
+        }
+      },
+      "set-caller-id": {
+        "position": {
+          "x": -112,
+          "y": -74.4
+        },
+        "dynamicParams": []
+      },
+      "error-handler": {
+        "position": {
+          "x": 341.6,
+          "y": 222.4
+        }
+      },
+      "set-conversation-context": {
+        "position": {
+          "x": 580.8,
+          "y": 293.6
+        },
+        "dynamicParams": []
       },
       "connect-to-lex": {
         "position": {
-          "x": 119.2,
-          "y": 222.4
+          "x": 120.8,
+          "y": 43.2
         },
         "parameters": {
           "LexV2Bot": {
-            "AliasArn": {}
+            "AliasArn": {
+              "lexV2BotName": ""
+            }
           }
         },
         "dynamicMetadata": {
-          "$.Attributes.ContactId": false
+          "x-amz-lex:audio:start-timeout-ms": false
         },
         "lexV2BotName": "",
         "conditionMetadata": [
           {
-            "id": "1b46a74b-7e13-4780-a8de-1ae23bb59c6b",
+            "id": "50a7334b-c801-4bef-82a0-18198fb20228",
             "operator": {
               "name": "Equals",
               "value": "Equals",
@@ -72,34 +78,31 @@
     "name": "BedrockPrimaryFlow",
     "description": "Bedrock-primary architecture with multi-turn conversation and intelligent agent transfer - PRIMARY FLOW FOR PHONE NUMBERS",
     "type": "contactFlow",
-    "status": "published",
+    "status": "PUBLISHED",
     "hash": {}
   },
   "Actions": [
-    {
-      "Identifier": "set-caller-id",
-      "Type": "UpdateContactAttributes",
-      "Parameters": {
-        "Attributes": {
-          "customer_number": "$.SystemEndpoint.Address",
-          "customerPhoneNumber": "$.SystemEndpoint.Address"
-        }
-      },
-      "Transitions": {
-        "NextAction": "connect-to-lex",
-        "Errors": [
-          {
-            "NextAction": "connect-to-lex",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
-    },
     {
       "Parameters": {},
       "Identifier": "disconnect",
       "Type": "DisconnectParticipant",
       "Transitions": {}
+    },
+    {
+      "Parameters": {
+        "QueueId": "${queue_arn}"
+      },
+      "Identifier": "set-queue",
+      "Type": "UpdateContactTargetQueue",
+      "Transitions": {
+        "NextAction": "transfer-to-agent",
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
     },
     {
       "Parameters": {},
@@ -121,27 +124,31 @@
     },
     {
       "Parameters": {
-        "Text": "Let me connect you with one of our specialists who can assist you. One moment please."
+        "Attributes": {
+          "customer_number": "$.SystemEndpoint.Address",
+          "customerPhoneNumber": "$.SystemEndpoint.Address"
+        }
       },
-      "Identifier": "error-handler",
-      "Type": "MessageParticipant",
+      "Identifier": "set-caller-id",
+      "Type": "UpdateContactAttributes",
       "Transitions": {
-        "NextAction": "set-conversation-context"
+        "NextAction": "connect-to-lex",
+        "Errors": [
+          {
+            "NextAction": "connect-to-lex",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
       }
     },
     {
       "Parameters": {
-        "Attributes": {
-          "ConversationSummary": "$.Attributes.conversation_summary",
-          "HandoverReason": "$.Attributes.handover_reason",
-          "LexIntent": "$.Attributes.lex.intent",
-          "CustomerContext": "Transferred from AI assistant"
-        }
+        "Text": "One moment please."
       },
-      "Identifier": "set-conversation-context",
-      "Type": "UpdateContactAttributes",
+      "Identifier": "error-handler",
+      "Type": "MessageParticipant",
       "Transitions": {
-        "NextAction": "set-queue",
+        "NextAction": "set-conversation-context",
         "Errors": [
           {
             "NextAction": "set-queue",
@@ -152,15 +159,20 @@
     },
     {
       "Parameters": {
-        "QueueId": "${queue_arn}"
+        "Attributes": {
+          "ConversationSummary": "$.Lex.SessionAttributes.conversation_summary",
+          "HandoverReason": "$.Lex.SessionAttributes.handover_reason",
+          "LexIntent": "$.Lex.IntentName",
+          "CustomerContext": "Transferred from AI assistant - Emma Thompson"
+        }
       },
-      "Identifier": "set-queue",
-      "Type": "UpdateContactTargetQueue",
+      "Identifier": "set-conversation-context",
+      "Type": "UpdateContactAttributes",
       "Transitions": {
-        "NextAction": "transfer-to-agent",
+        "NextAction": "set-queue",
         "Errors": [
           {
-            "NextAction": "disconnect",
+            "NextAction": "set-queue",
             "ErrorType": "NoMatchingError"
           }
         ]
@@ -179,7 +191,7 @@
       "Identifier": "connect-to-lex",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "connect-to-lex",
+        "NextAction": "error-handler",
         "Conditions": [
           {
             "NextAction": "set-conversation-context",
@@ -193,7 +205,7 @@
         ],
         "Errors": [
           {
-            "NextAction": "connect-to-lex",
+            "NextAction": "error-handler",
             "ErrorType": "NoMatchingCondition"
           },
           {

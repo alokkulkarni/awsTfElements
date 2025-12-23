@@ -144,23 +144,6 @@ resource "aws_connect_instance_storage_config" "call_recordings" {
 }
 
 # Contact Lens Real-Time Call Transcripts
-resource "aws_connect_instance_storage_config" "contact_lens_transcripts" {
-  instance_id   = module.connect_instance.id
-  resource_type = "REAL_TIME_CONTACT_ANALYSIS_SEGMENTS"
-
-  storage_config {
-    s3_config {
-      bucket_name   = module.connect_storage_bucket.id
-      bucket_prefix = "contact-lens-transcripts"
-      encryption_config {
-        encryption_type = "KMS"
-        key_id          = module.kms_key.arn
-      }
-    }
-    storage_type = "S3"
-  }
-}
-
 # Contact Trace Records storage not supported for this instance type
 # resource "aws_connect_instance_storage_config" "contact_trace_records" {
 #   instance_id   = module.connect_instance.id
@@ -828,12 +811,59 @@ module "bedrock_mcp_lambda" {
   ]
 }
 
+# Publish a new Lambda version whenever code changes
+resource "null_resource" "bedrock_mcp_publish" {
+  triggers = {
+    source_code_hash = data.archive_file.bedrock_mcp_zip.output_base64sha256
+    function_name    = module.bedrock_mcp_lambda.function_name
+    region           = var.region
+  }
+
+  provisioner "local-exec" {
+    command = "aws lambda publish-version --function-name ${self.triggers.function_name} --region ${self.triggers.region} --query 'Version' --output text > ${path.module}/.lambda_version"
+  }
+
+  depends_on = [module.bedrock_mcp_lambda]
+}
+
+# Read the published version
+data "local_file" "lambda_version" {
+  filename = "${path.module}/.lambda_version"
+  
+  depends_on = [null_resource.bedrock_mcp_publish]
+}
+
 # Alias and Provisioned Concurrency for Bedrock MCP Lambda
 resource "aws_lambda_alias" "bedrock_mcp_live" {
   name             = "live"
   description      = "Live alias for provisioned concurrency"
   function_name    = module.bedrock_mcp_lambda.function_name
-  function_version = module.bedrock_mcp_lambda.version
+  function_version = trimspace(data.local_file.lambda_version.content)
+  
+  lifecycle {
+    ignore_changes = [function_version]
+  }
+
+  depends_on = [null_resource.bedrock_mcp_publish]
+}
+
+# Update alias whenever version changes
+resource "null_resource" "bedrock_mcp_update_alias" {
+  triggers = {
+    version       = trimspace(data.local_file.lambda_version.content)
+    function_name = module.bedrock_mcp_lambda.function_name
+    alias_name    = aws_lambda_alias.bedrock_mcp_live.name
+    region        = var.region
+  }
+
+  provisioner "local-exec" {
+    command = "aws lambda update-alias --function-name ${self.triggers.function_name} --name ${self.triggers.alias_name} --function-version ${self.triggers.version} --region ${self.triggers.region}"
+  }
+
+  depends_on = [
+    aws_lambda_alias.bedrock_mcp_live,
+    null_resource.bedrock_mcp_publish
+  ]
 }
 
 resource "aws_lambda_provisioned_concurrency_config" "bedrock_mcp_pc" {
@@ -841,7 +871,10 @@ resource "aws_lambda_provisioned_concurrency_config" "bedrock_mcp_pc" {
   qualifier                         = aws_lambda_alias.bedrock_mcp_live.name
   provisioned_concurrent_executions = 2
 
-  depends_on = [aws_lambda_alias.bedrock_mcp_live]
+  depends_on = [
+    aws_lambda_alias.bedrock_mcp_live,
+    null_resource.bedrock_mcp_update_alias
+  ]
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -935,25 +968,6 @@ resource "aws_lexv2models_intent" "chat_en_us" {
   depends_on = [aws_lexv2models_bot_locale.en_us]
 }
 
-# Create FallbackIntent for en_US locale
-resource "aws_lexv2models_intent" "fallback_en_us" {
-  bot_id                  = module.lex_bot.bot_id
-  bot_version             = "DRAFT"
-  locale_id               = "en_US"
-  name                    = "FallbackIntent"
-  parent_intent_signature = "AMAZON.FallbackIntent"
-
-  fulfillment_code_hook {
-    enabled = true
-  }
-
-  dialog_code_hook {
-    enabled = true
-  }
-
-  depends_on = [aws_lexv2models_bot_locale.en_us]
-}
-
 # TransferToAgent intent for en_GB - used by Lambda to signal agent handover
 resource "aws_lexv2models_intent" "transfer_to_agent_en_gb" {
   bot_id      = module.lex_bot.bot_id
@@ -979,6 +993,150 @@ resource "aws_lexv2models_intent" "transfer_to_agent_en_us" {
 
   fulfillment_code_hook {
     enabled = false
+  }
+
+  depends_on = [aws_lexv2models_bot_locale.en_us]
+}
+
+# Update FallbackIntent for en_GB locale (auto-created by Lex)
+# Using null_resource with AWS CLI because FallbackIntent is automatically created by Lex
+# and we can't manage it directly with Terraform without import
+resource "null_resource" "update_fallback_intent_en_gb" {
+  triggers = {
+    bot_id    = module.lex_bot.bot_id
+    locale_id = var.locale
+    region    = var.region
+    # Force update when ChatIntent changes to ensure FallbackIntent is updated after locale build
+    chat_intent_id = module.lex_bot.chat_intent_id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "🔧 Updating FallbackIntent for en_GB locale..."
+      
+      # Wait for locale to be ready (it might still be creating)
+      for i in {1..30}; do
+        STATUS=$(aws lexv2-models describe-bot-locale \
+          --bot-id ${self.triggers.bot_id} \
+          --bot-version DRAFT \
+          --locale-id ${self.triggers.locale_id} \
+          --region ${self.triggers.region} \
+          --query 'botLocaleStatus' \
+          --output text 2>/dev/null || echo "NotReady")
+        
+        if [ "$STATUS" = "NotBuilt" ] || [ "$STATUS" = "ReadyExpressTesting" ] || [ "$STATUS" = "Built" ]; then
+          break
+        fi
+        
+        if [ $i -eq 30 ]; then
+          echo "⚠️ Locale not ready after 30 attempts, proceeding anyway..."
+          break
+        fi
+        
+        sleep 2
+      done
+      
+      # Get the FallbackIntent ID
+      INTENT_ID=$(aws lexv2-models list-intents \
+        --bot-id ${self.triggers.bot_id} \
+        --bot-version DRAFT \
+        --locale-id ${self.triggers.locale_id} \
+        --region ${self.triggers.region} \
+        --query "intentSummaries[?intentName=='FallbackIntent'].intentId" \
+        --output text)
+      
+      if [ -z "$INTENT_ID" ]; then
+        echo "⚠️ FallbackIntent not found yet for en_GB, it will be created when locale is built"
+        exit 0
+      fi
+      
+      echo "  Found FallbackIntent ID: $INTENT_ID"
+      
+      # Update the FallbackIntent to enable both hooks
+      aws lexv2-models update-intent \
+        --bot-id ${self.triggers.bot_id} \
+        --bot-version DRAFT \
+        --locale-id ${self.triggers.locale_id} \
+        --intent-id "$INTENT_ID" \
+        --intent-name "FallbackIntent" \
+        --parent-intent-signature "AMAZON.FallbackIntent" \
+        --fulfillment-code-hook enabled=true \
+        --dialog-code-hook enabled=true \
+        --region ${self.triggers.region}
+      
+      echo "✅ FallbackIntent for en_GB updated successfully"
+    EOT
+  }
+
+  depends_on = [module.lex_bot.bot_locale_id]
+}
+
+# Update FallbackIntent for en_US locale (auto-created by Lex)
+resource "null_resource" "update_fallback_intent_en_us" {
+  triggers = {
+    bot_id    = module.lex_bot.bot_id
+    locale_id = "en_US"
+    region    = var.region
+    # Force update when ChatIntent changes to ensure FallbackIntent is updated after locale build
+    chat_intent_id = aws_lexv2models_intent.chat_en_us.id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "🔧 Updating FallbackIntent for en_US locale..."
+      
+      # Wait for locale to be ready
+      for i in {1..30}; do
+        STATUS=$(aws lexv2-models describe-bot-locale \
+          --bot-id ${self.triggers.bot_id} \
+          --bot-version DRAFT \
+          --locale-id ${self.triggers.locale_id} \
+          --region ${self.triggers.region} \
+          --query 'botLocaleStatus' \
+          --output text 2>/dev/null || echo "NotReady")
+        
+        if [ "$STATUS" = "NotBuilt" ] || [ "$STATUS" = "ReadyExpressTesting" ] || [ "$STATUS" = "Built" ]; then
+          break
+        fi
+        
+        if [ $i -eq 30 ]; then
+          echo "⚠️ Locale not ready after 30 attempts, proceeding anyway..."
+          break
+        fi
+        
+        sleep 2
+      done
+      
+      # Get the FallbackIntent ID
+      INTENT_ID=$(aws lexv2-models list-intents \
+        --bot-id ${self.triggers.bot_id} \
+        --bot-version DRAFT \
+        --locale-id ${self.triggers.locale_id} \
+        --region ${self.triggers.region} \
+        --query "intentSummaries[?intentName=='FallbackIntent'].intentId" \
+        --output text)
+      
+      if [ -z "$INTENT_ID" ]; then
+        echo "⚠️ FallbackIntent not found yet for en_US, it will be created when locale is built"
+        exit 0
+      fi
+      
+      echo "  Found FallbackIntent ID: $INTENT_ID"
+      
+      # Update the FallbackIntent to enable both hooks
+      aws lexv2-models update-intent \
+        --bot-id ${self.triggers.bot_id} \
+        --bot-version DRAFT \
+        --locale-id ${self.triggers.locale_id} \
+        --intent-id "$INTENT_ID" \
+        --intent-name "FallbackIntent" \
+        --parent-intent-signature "AMAZON.FallbackIntent" \
+        --fulfillment-code-hook enabled=true \
+        --dialog-code-hook enabled=true \
+        --region ${self.triggers.region}
+      
+      echo "✅ FallbackIntent for en_US updated successfully"
+    EOT
   }
 
   depends_on = [aws_lexv2models_bot_locale.en_us]
@@ -1097,7 +1255,9 @@ resource "null_resource" "build_bot_locales" {
     aws_lexv2models_bot_locale.en_us,
     aws_lexv2models_intent.chat_en_us,
     aws_lexv2models_intent.transfer_to_agent_en_gb,
-    aws_lexv2models_intent.transfer_to_agent_en_us
+    aws_lexv2models_intent.transfer_to_agent_en_us,
+    null_resource.update_fallback_intent_en_gb,
+    null_resource.update_fallback_intent_en_us
   ]
 }
 
@@ -1678,9 +1838,7 @@ resource "aws_connect_contact_flow" "customer_queue" {
   name        = "CustomerQueueFlow"
   description = "Simple queue flow with hold messages"
   type        = "CUSTOMER_QUEUE"
-  content = templatefile("${path.module}/contact_flows/customer_queue_flow.json.tftpl", {
-    callback_lambda_arn = module.callback_lambda.arn
-  })
+  content = templatefile("${path.module}/contact_flows/customer_queue_flow_minimal.json.tftpl", {})
   tags = var.tags
 
   depends_on = []
