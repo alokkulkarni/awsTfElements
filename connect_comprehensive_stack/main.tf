@@ -2389,3 +2389,36 @@ resource "aws_cloudwatch_dashboard" "main" {
     ]
   })
 }
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Centralized Log Archiving to S3 via Firehose
+# ---------------------------------------------------------------------------------------------------------------------
+module "log_archive_firehose" {
+  source = "../resources/firehose"
+
+  project_name            = var.project_name
+  destination_bucket_arn  = module.connect_storage_bucket.arn
+  destination_prefix      = "cloudwatch-logs/"
+  kms_key_arn             = module.kms_key.arn
+  tags                    = var.tags
+}
+
+# Subscription Filters for Critical Log Groups
+
+# 1. Bedrock MCP Lambda Logs
+resource "aws_cloudwatch_log_subscription_filter" "bedrock_mcp_logs" {
+  name            = "BedrockMCP-to-S3"
+  log_group_name  = aws_cloudwatch_log_group.bedrock_mcp.name
+  filter_pattern  = "" # Capture all logs
+  destination_arn = module.log_archive_firehose.delivery_stream_arn
+  role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+}
+
+# 2. Lex Logs
+resource "aws_cloudwatch_log_subscription_filter" "lex_logs" {
+  name            = "Lex-to-S3"
+  log_group_name  = aws_cloudwatch_log_group.lex_logs.name
+  filter_pattern  = ""
+  destination_arn = module.log_archive_firehose.delivery_stream_arn
+  role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+}
