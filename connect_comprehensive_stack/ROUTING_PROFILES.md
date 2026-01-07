@@ -70,15 +70,15 @@ Routing profiles determine which queues an agent can handle, what types of conta
 
 ## Comparison Table
 
-| Feature | Basic Routing Profile | Main Routing Profile |
-|---------|----------------------|---------------------|
-| **Voice Concurrency** | 1 | 1 |
-| **Chat Concurrency** | 2 | 2 |
-| **Task Concurrency** | 1 | 10 |
-| **Number of Queues** | 2 (BasicQueue + GeneralAgentQueue) | 1 (GeneralAgentQueue only) |
-| **Outbound Calling** | Yes | Yes |
-| **Complexity** | Lower | Higher |
-| **Best For** | New agents, testing | Senior agents, high volume |
+| Feature | Basic Routing Profile | Main Routing Profile | Specialist Profiles (Account, Lending, Onboarding) |
+|---------|----------------------|---------------------|----------------------------------------------------|
+| **Voice Concurrency** | 1 | 1 | 1 |
+| **Chat Concurrency** | 2 | 2 | 2 |
+| **Task Concurrency** | 1 | 10 | 10 |
+| **Number of Queues** | 2 (Basic + General) | 1 (General) | 1 (Specific Service Queue) |
+| **Outbound Calling** | Yes | Yes | Yes |
+| **Complexity** | Lower | Higher | Higher |
+| **Best For** | New agents, testing | Senior Managers | Subject Matter Experts |
 
 ---
 
@@ -86,17 +86,61 @@ Routing profiles determine which queues an agent can handle, what types of conta
 
 ### Agent 1 (`agent1`)
 - **Profile:** Basic Routing Profile
-- **Username:** `agent1`
-- **Password:** `Password123!`
-- **Use Case:** Entry-level agent, testing, chat functionality validation
+- **Security Profile:** Agent (Standard Access)
+- **Role:** Junior Generalist
+- **Scope:** Handles BasicQueue (P1) and GeneralAgentQueue (P2 backup). Limited task capacity.
 
 ### Agent 2 (`agent2`)
 - **Profile:** Main Routing Profile
-- **Username:** `agent2`
-- **Password:** `Password123!`
-- **Use Case:** Advanced agent, high-volume task processing
+- **Security Profile:** CallCenterManager (Monitoring, Barge-in, Takeover)
+- **Role:** Senior Manager / Supervisor
+- **Scope:** Handles GeneralAgentQueue (P1). High task capacity (10). Capabilities to monitor and intercept calls from all other agents.
+
+### Agent 3 (`agent3`)
+- **Profile:** Account Services Routing Profile
+- **Security Profile:** Agent (Standard Access)
+- **Role:** Account Specialist
+- **Scope:** Dedicated exclusively to the AccountQueue (P1).
+
+### Agent 4 (`agent4`)
+- **Profile:** Lending Services Routing Profile
+- **Security Profile:** Agent (Standard Access)
+- **Role:** Lending Specialist
+- **Scope:** Dedicated exclusively to the LendingQueue (P1).
+
+### Agent 5 (`agent5`)
+- **Profile:** Onboarding Services Routing Profile
+- **Security Profile:** Agent (Standard Access)
+- **Role:** Onboarding Specialist
+- **Scope:** Dedicated exclusively to the OnboardingQueue (P1).
 
 ---
+
+## Special Profiles (New)
+
+### Account Services Routing Profile
+- **Target:** Specialists in account maintenance.
+- **Queues:** AccountQueue only.
+- **Concurrency:** Voice (1), Chat (2), Task (10).
+
+### Lending Services Routing Profile
+- **Target:** Loan officers and mortgage support.
+- **Queues:** LendingQueue only.
+- **Concurrency:** Voice (1), Chat (2), Task (10).
+
+### Onboarding Services Routing Profile
+- **Target:** New customer acquisition.
+- **Queues:** OnboardingQueue only.
+- **Concurrency:** Voice (1), Chat (2), Task (10).
+
+---
+
+## Transfer Capabilities (Quick Connects)
+
+We have enabled **Global Queue Visibility**. This means:
+*   Every agent, regardless of their profile (Basic vs. Specialist), can see **all queues** in their transfer list.
+*   **Mechanism**: Queue Quick Connects have been created and associated with every queue in the instance.
+*   **Experience**: An agent in the Account Queue can natively transfer a customer to the Lending Queue properly maintaining context and without incurring external telephony charges.
 
 ## Queue Priority Explained
 
@@ -134,9 +178,15 @@ In **Main Routing Profile:**
 
 ## Technical Implementation
 
-Both profiles are managed in `main.tf`:
+All profiles are managed in `main.tf`.
 
 ```terraform
+# Service Lines Routing Profiles (Account, Lending, Onboarding)
+resource "aws_connect_routing_profile" "service_lines" {
+  for_each = var.service_lines
+  # ... Maps to respective ServiceQueue (Priority 1)
+}
+
 # Basic Routing Profile - Entry-level with multiple queues
 resource "aws_connect_routing_profile" "basic" {
   # ... BasicQueue (Priority 1) + GeneralAgentQueue (Priority 2)
@@ -148,9 +198,10 @@ resource "aws_connect_routing_profile" "main" {
 }
 ```
 
-The profiles are assigned to agents during user creation:
+The profiles are assigned to agents specifically:
 - `agent1` → Basic Routing Profile
-- `agent2` → Main Routing Profile
+- `agent2` → Main Routing Profile (Manager)
+- `agent3`, `agent4`, `agent5` → Respective Specialist Profiles
 
 ---
 

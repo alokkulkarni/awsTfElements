@@ -10,7 +10,7 @@ The queue management system provides a seamless experience for customers waiting
 
 ### Components
 
-1. **GeneralAgentQueue**: Primary queue for agent handover
+1. **Service Queues**: Dedicated queues for Account, Lending, Onboarding, and General services
 2. **Customer Queue Flow**: Manages the wait experience
 3. **Callback Lambda**: Handles callback request processing
 4. **Callback DynamoDB Table**: Stores callback requests
@@ -19,7 +19,7 @@ The queue management system provides a seamless experience for customers waiting
 ### Queue Flow Diagram
 
 ```
-Customer Request → Handover Detection → GeneralAgentQueue
+Customer Request → Handover Detection → Specific Service Queue
                                               ↓
                                     Customer Queue Flow
                                               ↓
@@ -48,14 +48,18 @@ Customer Request → Handover Detection → GeneralAgentQueue
                                     Goodbye
 ```
 
-## GeneralAgentQueue Configuration
+## Service Queue Configuration
 
 ### Queue Settings
 
+We configure specialized queues for each service line (Account, Lending, Onboarding) alongside a General queue.
+
 ```hcl
 resource "aws_connect_queue" "queues" {
-  name                  = "GeneralAgentQueue"
-  description           = "Primary queue for agent handover"
+  for_each              = var.service_lines
+  
+  name                  = "${each.key}ServiceQueue"
+  description           = "Queue for ${each.key} services"
   hours_of_operation_id = data.aws_connect_hours_of_operation.default.hours_of_operation_id
   
   outbound_caller_config {

@@ -175,6 +175,11 @@ data "aws_connect_security_profile" "admin" {
   name        = "Admin"
 }
 
+data "aws_connect_security_profile" "call_center_manager" {
+  instance_id = module.connect_instance.id
+  name        = "CallCenterManager"
+}
+
 # Data source for the default Beep.wav prompt
 data "aws_connect_prompt" "beep" {
   instance_id = module.connect_instance.id
@@ -433,14 +438,18 @@ resource "aws_connect_user" "agent_basic" {
   tags = var.tags
 }
 
-# Agent 2 - Uses Main Routing Profile (advanced)
+# Agent 2 - Call Center Manager & Main Routing Profile
+# Assigned CallCenterManager security profile to allow:
+# - Monitoring (Listen)
+# - Barge-in (3-way)
+# - Take Over (Disconnect Agent)
 resource "aws_connect_user" "agent_main" {
   instance_id        = module.connect_instance.id
   name               = "agent2"
   password           = "Password123!"
   routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
   security_profile_ids = [
-    data.aws_connect_security_profile.admin.security_profile_id
+    data.aws_connect_security_profile.call_center_manager.security_profile_id
   ]
 
   identity_info {
