@@ -286,6 +286,120 @@ resource "aws_connect_routing_profile" "basic" {
   tags = var.tags
 }
 
+resource "aws_connect_routing_profile" "account" {
+  instance_id = module.connect_instance.id
+  name        = "Account Services Routing Profile"
+  description = "Profile for account services agents"
+  default_outbound_queue_id = aws_connect_queue.queues["AccountQueue"].queue_id
+
+  media_concurrencies {
+    channel     = "VOICE"
+    concurrency = 1
+  }
+  
+  media_concurrencies {
+    channel     = "CHAT"
+    concurrency = 2
+  }
+  
+  media_concurrencies {
+    channel     = "TASK"
+    concurrency = 10
+  }
+
+  queue_configs {
+    channel  = "VOICE"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["AccountQueue"].queue_id
+  }
+  
+  queue_configs {
+    channel  = "CHAT"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["AccountQueue"].queue_id
+  }
+  
+  tags = var.tags
+}
+
+resource "aws_connect_routing_profile" "lending" {
+  instance_id = module.connect_instance.id
+  name        = "Lending Services Routing Profile"
+  description = "Profile for lending services agents"
+  default_outbound_queue_id = aws_connect_queue.queues["LendingQueue"].queue_id
+
+  media_concurrencies {
+    channel     = "VOICE"
+    concurrency = 1
+  }
+  
+  media_concurrencies {
+    channel     = "CHAT"
+    concurrency = 2
+  }
+  
+  media_concurrencies {
+    channel     = "TASK"
+    concurrency = 10
+  }
+
+  queue_configs {
+    channel  = "VOICE"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["LendingQueue"].queue_id
+  }
+  
+  queue_configs {
+    channel  = "CHAT"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["LendingQueue"].queue_id
+  }
+  
+  tags = var.tags
+}
+
+resource "aws_connect_routing_profile" "onboarding" {
+  instance_id = module.connect_instance.id
+  name        = "Onboarding Services Routing Profile"
+  description = "Profile for onboarding services agents"
+  default_outbound_queue_id = aws_connect_queue.queues["OnboardingQueue"].queue_id
+
+  media_concurrencies {
+    channel     = "VOICE"
+    concurrency = 1
+  }
+  
+  media_concurrencies {
+    channel     = "CHAT"
+    concurrency = 2
+  }
+  
+  media_concurrencies {
+    channel     = "TASK"
+    concurrency = 10
+  }
+
+  queue_configs {
+    channel  = "VOICE"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["OnboardingQueue"].queue_id
+  }
+  
+  queue_configs {
+    channel  = "CHAT"
+    delay    = 0
+    priority = 1
+    queue_id = aws_connect_queue.queues["OnboardingQueue"].queue_id
+  }
+  
+  tags = var.tags
+}
+
 # Data source to reference the existing BasicQueue (not managed by Terraform)
 data "aws_connect_queue" "basic" {
   instance_id = module.connect_instance.id
@@ -343,12 +457,12 @@ resource "aws_connect_user" "agent_main" {
   tags = var.tags
 }
 
-# Agent 3 - Non-admin, main routing profile
+# Agent 3 - Non-admin, Account Services profile
 resource "aws_connect_user" "agent3" {
   instance_id        = module.connect_instance.id
   name               = "agent3"
   password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
+  routing_profile_id = aws_connect_routing_profile.account.routing_profile_id
   security_profile_ids = [
     data.aws_connect_security_profile.agent.security_profile_id
   ]
@@ -367,12 +481,12 @@ resource "aws_connect_user" "agent3" {
   tags = var.tags
 }
 
-# Agent 4 - Non-admin, main routing profile
+# Agent 4 - Non-admin, Lending Services profile
 resource "aws_connect_user" "agent4" {
   instance_id        = module.connect_instance.id
   name               = "agent4"
   password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
+  routing_profile_id = aws_connect_routing_profile.lending.routing_profile_id
   security_profile_ids = [
     data.aws_connect_security_profile.agent.security_profile_id
   ]
@@ -381,6 +495,30 @@ resource "aws_connect_user" "agent4" {
     first_name = "Agent"
     last_name  = "Four"
     email      = "agent4@example.com"
+  }
+
+  phone_config {
+    phone_type  = "SOFT_PHONE"
+    auto_accept = true
+  }
+
+  tags = var.tags
+}
+
+# Agent 5 - Non-admin, Onboarding Services profile
+resource "aws_connect_user" "agent5" {
+  instance_id        = module.connect_instance.id
+  name               = "agent5"
+  password           = "Password123!"
+  routing_profile_id = aws_connect_routing_profile.onboarding.routing_profile_id
+  security_profile_ids = [
+    data.aws_connect_security_profile.agent.security_profile_id
+  ]
+
+  identity_info {
+    first_name = "Agent"
+    last_name  = "Five"
+    email      = "agent5@example.com"
   }
 
   phone_config {
@@ -621,20 +759,15 @@ module "bedrock_guardrail" {
 # Lambda for Bedrock MCP Integration (Primary Intent Classification and Tool Calling)
 # ---------------------------------------------------------------------------------------------------------------------
 # Trigger to detect Lambda source code changes
-data "local_file" "bedrock_lambda_source" {
-  filename = "${path.module}/${var.bedrock_mcp_lambda.source_dir}/lambda_function.py"
-}
-
-# Trigger to detect dependency changes
-data "local_file" "bedrock_lambda_requirements" {
-  filename = "${path.module}/${var.bedrock_mcp_lambda.source_dir}/requirements.txt"
-}
+# Note: Source tracking is performed via 'fileset' in the null_resource triggers below
 
 # Build the Lambda deployment package with dependencies (FastMCP 2.0)
 resource "null_resource" "bedrock_mcp_build" {
   triggers = {
-    src_hash = data.local_file.bedrock_lambda_source.content_md5
-    req_hash = data.local_file.bedrock_lambda_requirements.content_md5
+    # Hash all Python files in the source directory to detect code changes
+    src_hash = sha256(join("", [for f in fileset("${path.module}/${var.bedrock_mcp_lambda.source_dir}", "*.py") : filesha256("${path.module}/${var.bedrock_mcp_lambda.source_dir}/${f}")]))
+    # Hash requirements.txt to detect dependency changes
+    req_hash = filesha256("${path.module}/${var.bedrock_mcp_lambda.source_dir}/requirements.txt")
   }
 
   provisioner "local-exec" {
@@ -675,9 +808,7 @@ data "archive_file" "bedrock_mcp_zip" {
   output_path = "${path.module}/lambda/bedrock_mcp.zip"
 
   depends_on = [
-    null_resource.bedrock_mcp_build,
-    data.local_file.bedrock_lambda_source,
-    data.local_file.bedrock_lambda_requirements
+    null_resource.bedrock_mcp_build
   ]
 }
 
@@ -806,6 +937,12 @@ module "bedrock_mcp_lambda" {
     
     # Conversation History
     CONVERSATION_HISTORY_TABLE_NAME = module.conversation_history_table.name
+    
+    # Queue ARNs for Dynamic Routing
+    QUEUE_ARN_GENERAL    = aws_connect_queue.queues["GeneralAgentQueue"].arn
+    QUEUE_ARN_ACCOUNT    = aws_connect_queue.queues["AccountQueue"].arn
+    QUEUE_ARN_LENDING    = aws_connect_queue.queues["LendingQueue"].arn
+    QUEUE_ARN_ONBOARDING = aws_connect_queue.queues["OnboardingQueue"].arn
   }
 
   tags = var.tags
@@ -1530,6 +1667,52 @@ resource "null_resource" "associate_customer_queue_flow" {
     aws_connect_queue.queues,
     aws_connect_contact_flow.customer_queue
   ]
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Quick Connects & Associations
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Create Quick Connects (Transfer to Queue) for all defined queues
+resource "aws_connect_quick_connect" "queue_transfer" {
+  for_each = var.queues
+
+  instance_id = module.connect_instance.id
+  name        = "Transfer to ${each.key}"
+  description = "Transfer to ${each.value.description}"
+
+  quick_connect_config {
+    quick_connect_type = "QUEUE"
+    queue_config {
+      queue_id        = aws_connect_queue.queues[each.key].queue_id
+      contact_flow_id = aws_connect_contact_flow.customer_queue.contact_flow_id
+    }
+  }
+
+  tags = var.tags
+}
+
+# Associate ALL Quick Connects with ALL Queues using AWS CLI
+# (Using null_resource as aws_connect_queue_quick_connect might not be available in current provider version)
+resource "null_resource" "associate_quick_connects" {
+  for_each = var.queues
+
+  triggers = {
+    queue_id = aws_connect_queue.queues[each.key].queue_id
+    qc_ids   = join(",", sort([for qc in aws_connect_quick_connect.queue_transfer : qc.quick_connect_id]))
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws connect associate-queue-quick-connects \
+        --instance-id ${module.connect_instance.id} \
+        --queue-id ${aws_connect_queue.queues[each.key].queue_id} \
+        --quick-connect-ids ${join(" ", [for qc in aws_connect_quick_connect.queue_transfer : qc.quick_connect_id])} \
+        --region ${var.region}
+    EOT
+  }
+
+  depends_on = [aws_connect_quick_connect.queue_transfer]
 }
 
 # Note: The connect module might not output hours_of_operation_id. 

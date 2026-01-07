@@ -1131,10 +1131,65 @@ def detect_handover_need(user_message: str, bedrock_response: Dict[str, Any], co
     
     return (False, None, None)
 
+def determine_target_queue(user_message: str, conversation_history: List[Dict]) -> str:
+    """
+    Determine the appropriate queue ARN based on customer intent/topic.
+    """
+    # Get queue ARNs from environment variables
+    queue_general = os.environ.get('QUEUE_ARN_GENERAL', '')
+    queue_account = os.environ.get('QUEUE_ARN_ACCOUNT', '')
+    queue_lending = os.environ.get('QUEUE_ARN_LENDING', '')
+    queue_onboarding = os.environ.get('QUEUE_ARN_ONBOARDING', '')
+    
+    # Fallback to general if others not set
+    target_queue = queue_general
+    
+    # Analyze topic based on keywords in user message and recent history
+    # Construct a context string from the last few messages
+    context_text = user_message.lower()
+    for msg in conversation_history[-2:]:
+        context_text += " " + msg.get("content", "").lower()
+        
+    # Topic Matching Logic
+    
+    # 1. Accounts & Transactions
+    account_keywords = [
+        "balance", "transaction", "statement", "overdraft", "debit card",
+        "spending", "savings", "checking", "withdrawal", "deposit", "transfer money"
+    ]
+    if any(k in context_text for k in account_keywords) and queue_account:
+        logger.info(f"Routing to AccountQueue based on keywords in: '{context_text[:50]}...'")
+        return queue_account
+        
+    # 2. Lending & Mortgages
+    lending_keywords = [
+        "loan", "mortgage", "credit card", "borrow", "lending",
+        "rate", "interest", "repay", "debt"
+    ]
+    if any(k in context_text for k in lending_keywords) and queue_lending:
+        logger.info(f"Routing to LendingQueue based on keywords in: '{context_text[:50]}...'")
+        return queue_lending
+        
+    # 3. Onboarding & New Accounts
+    onboarding_keywords = [
+        "open account", "new account", "join", "switch", "application",
+        "sign up", "register", "start", "document", "id"
+    ]
+    if any(k in context_text for k in onboarding_keywords) and queue_onboarding:
+        logger.info(f"Routing to OnboardingQueue based on keywords in: '{context_text[:50]}...'")
+        return queue_onboarding
+    
+    # Default
+    logger.info("Routing to GeneralAgentQueue (default)")
+    return queue_general
+
 def initiate_agent_handover(conversation_history: List[Dict], handover_reason: str, user_message: str) -> Dict[str, Any]:
     """
     Format response to trigger agent handover in Connect.
     """
+    # Determine target queue based on conversation context
+    target_queue_arn = determine_target_queue(user_message, conversation_history)
+    
     # Extract conversation summary
     conversation_summary = {
         "customer_query": user_message,
@@ -1169,7 +1224,8 @@ def initiate_agent_handover(conversation_history: List[Dict], handover_reason: s
             "sessionAttributes": {
                 "conversation_summary": json.dumps(conversation_summary),
                 "handover_reason": handover_reason,
-                "lex_intent": "TransferToAgent"
+                "lex_intent": "TransferToAgent",
+                "target_queue_arn": target_queue_arn
             }
         },
         "messages": [

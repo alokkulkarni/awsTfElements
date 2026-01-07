@@ -161,7 +161,7 @@
     },
     {
       "Parameters": {
-        "QueueId": "${queue_arn}"
+        "QueueId": "$.Attributes.target_queue_arn"
       },
       "Identifier": "set-queue",
       "Type": "UpdateContactTargetQueue",
@@ -181,6 +181,7 @@
           "ConversationSummary": "$.Attributes.conversation_summary",
           "HandoverReason": "$.Attributes.handover_reason",
           "LexIntent": "$.Attributes.lex_intent",
+          "TargetQueueArn": "$.Attributes.target_queue_arn",
           "CustomerContext": "Transferred from AI assistant - Emma Thompson"
         }
       },
