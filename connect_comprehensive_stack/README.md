@@ -5,7 +5,12 @@ This Terraform stack deploys a complete Amazon Connect environment with a Bedroc
 ## Features
 - **Amazon Connect**: Core contact center instance with Contact Lens, Flow Logs, and comprehensive queue management.
 - **Bedrock-Primary Hybrid Architecture**: Combines Claude 3.5 Sonnet for conversational AI with specialized deterministic Lambdas for high-speed, low-cost transaction processing.
-- **Data Lake & Analytics**: Serverless data pipeline (Kinesis -> Firehose -> S3 -> Athena) for deep analysis of Contact Trace Records (CTRs) and Agent Events.
+- **Data Lake & Analytics**: Serverless data pipeline (Kinesis -> Firehose -> S3 -> Athena) for deep analysis of:
+    - Contact Trace Records (CTRs)
+    - Agent Events
+    - AI Insights (Hallucination logs, Latency metrics, Full query/response audit)
+    - **Contact Lens Analytics** (Sentiment trends, Interruption analysis, Category matches)
+    - **System Health** (CloudWatch Metrics streamed to S3 for long-term trending)
 - **FastMCP 2.0 Tools**: Intelligent tool calling for account opening information, debit card details, and branch location services.
 - **Smart Routing**: Hybrid router automatically dispatches requests to either Generative AI (Bedrock) or Specialized Lambdas (Python) based on intent.
 - **Hallucination Detection**: Real-time validation agent that detects and prevents AI hallucinations with automated logging and metrics.
@@ -94,7 +99,8 @@ Real-time hallucination detection that:
 - Validates domain boundaries to prevent off-topic responses
 - Verifies document accuracy and branch information
 - Logs hallucinations to DynamoDB with 90-day retention
-- Publishes CloudWatch metrics for monitoring
+- **Streams detailed logs to Data Lake for SQL-based analysis**
+- Publishes CloudWatch metrics (`HallucinationDetectionRate`, `ValidationSuccessRate`, `ValidationLatency`)
 - Implements severity-based response strategies (regenerate or safe fallback)
 
 ### Agent Handover

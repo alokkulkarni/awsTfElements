@@ -644,6 +644,25 @@ resource "aws_iam_role_policy" "lambda_policy" {
   })
 }
 
+resource "aws_iam_role_policy" "ai_insights_kinesis_policy" {
+  name = "${var.project_name}-ai-insights-kinesis-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "kinesis:PutRecord",
+          "kinesis:PutRecords"
+        ]
+        Effect   = "Allow"
+        Resource = module.kinesis_ai_reporting.arn
+      }
+    ]
+  })
+}
+
 resource "aws_cloudwatch_log_group" "bedrock_mcp" {
   name              = "/aws/lambda/${var.project_name}-bedrock-mcp"
   retention_in_days = 30
@@ -676,6 +695,9 @@ module "bedrock_mcp_lambda" {
     # Hallucination Detection
     ENABLE_HALLUCINATION_DETECTION  = "true"
     HALLUCINATION_TABLE_NAME        = module.hallucination_logs_table.name
+    
+    # AI Reporting
+    AI_INSIGHTS_STREAM_NAME         = module.kinesis_ai_reporting.name
     
     # Conversation History
     CONVERSATION_HISTORY_TABLE_NAME = module.conversation_history_table.name
@@ -2476,6 +2498,92 @@ module "firehose_agent_events" {
   tags                   = var.tags
 }
 
+module "kinesis_ai_reporting" {
+  source           = "../resources/kinesis_stream"
+  name             = "${var.project_name}-ai-reporting-stream"
+  shard_count      = 1
+  retention_period = 24
+  tags             = var.tags
+}
+
+module "firehose_ai_reporting" {
+  source                 = "../resources/firehose"
+  project_name           = "${var.project_name}-ai-reporting"
+  destination_bucket_arn = module.datalake_bucket.arn
+  destination_prefix     = "ai-insights/"
+  kinesis_source_arn     = module.kinesis_ai_reporting.arn
+  tags                   = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# LIFECYCLE EVENTS IMPLEMENTATION (Point 4)
+# ---------------------------------------------------------------------------------------------------------------------
+
+module "firehose_lifecycle_events" {
+  source                 = "../resources/firehose"
+  project_name           = "${var.project_name}-lifecycle"
+  destination_bucket_arn = module.datalake_bucket.arn
+  destination_prefix     = "lifecycle-events/"
+  kinesis_source_arn     = null # Direct PUT from EventBridge
+  tags                   = var.tags
+}
+
+resource "aws_iam_role" "eventbridge_firehose_role" {
+  name = "${var.project_name}-eb-firehose-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+      }
+    ]
+  })
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "eventbridge_firehose_policy" {
+  name = "${var.project_name}-eb-firehose-policy"
+  role = aws_iam_role.eventbridge_firehose_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "firehose:PutRecord",
+          "firehose:PutRecordBatch"
+        ]
+        Resource = [module.firehose_lifecycle_events.delivery_stream_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_event_rule" "connect_lifecycle" {
+  name        = "${var.project_name}-lifecycle-events"
+  description = "Capture Amazon Connect Contact Lifecycle Events"
+
+  event_pattern = jsonencode({
+    source      = ["aws.connect"]
+    detail-type = ["Amazon Connect Contact Event"]
+  })
+  
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_event_target" "connect_lifecycle_firehose" {
+  rule      = aws_cloudwatch_event_rule.connect_lifecycle.name
+  target_id = "SendToFirehose"
+  arn       = module.firehose_lifecycle_events.delivery_stream_arn
+  role_arn  = aws_iam_role.eventbridge_firehose_role.arn
+}
+
 resource "aws_connect_instance_storage_config" "ctr_stream" {
   instance_id   = module.connect_instance.id
   resource_type = "CONTACT_TRACE_RECORDS"
@@ -2510,7 +2618,14 @@ module "glue_datalake" {
       columns = [
         { name = "ContactId", type = "string" },
         { name = "Agent", type = "struct<ARN:string,AfterContactWorkDuration:int,AfterContactWorkStartTimestamp:string,AfterContactWorkEndTimestamp:string,AgentInteractionDuration:int,ConnectedToAgentTimestamp:string,CustomerHoldDuration:int,HierarchyGroups:struct<Level1:struct<ARN:string,GroupName:string>,Level2:struct<ARN:string,GroupName:string>,Level3:struct<ARN:string,GroupName:string>,Level4:struct<ARN:string,GroupName:string>,Level5:struct<ARN:string,GroupName:string>>,LongestHoldDuration:int,NumberOfHolds:int,RoutingProfile:struct<ARN:string,Name:string>,Username:string>" },
-        { name = "Queue", type = "struct<ARN:string,DequeueTimestamp:string,Duration:int,EnqueueTimestamp:string,Name:string>" }
+        { name = "Queue", type = "struct<ARN:string,DequeueTimestamp:string,Duration:int,EnqueueTimestamp:string,Name:string>" },
+        { name = "DisconnectReason", type = "string" },
+        { name = "Channel", type = "string" },
+        { name = "InitiationMethod", type = "string" },
+        { name = "InitiationTimestamp", type = "string" },
+        { name = "DisconnectTimestamp", type = "string" },
+        { name = "ConnectedToSystemTimestamp", type = "string" },
+        { name = "TransferCompletedTimestamp", type = "string" }
       ]
     },
     {
@@ -2522,6 +2637,65 @@ module "glue_datalake" {
         { name = "EventTimestamp", type = "string" },
         { name = "EventType", type = "string" }
       ]
+    },
+    {
+      name     = "lifecycle_events"
+      location = "s3://${module.datalake_bucket.id}/lifecycle-events/"
+      columns = [
+        { name = "id", type = "string" },
+        { name = "detail-type", type = "string" },
+        { name = "source", type = "string" },
+        { name = "time", type = "string" },
+        { name = "detail", type = "struct<contactId:string,initiationMethod:string,channel:string,queueInfo:struct<queueArn:string,queueType:string,enqueueTimestamp:string>,agentInfo:struct<agentArn:string,connectedToAgentTimestamp:string>>" }
+      ]
+    },
+    {
+      name     = "ai_insights"
+      location = "s3://${module.datalake_bucket.id}/ai-insights/"
+      columns = [
+        { name = "timestamp", type = "string" },
+        { name = "request_id", type = "string" },
+        { name = "session_id", type = "string" },
+        { name = "latency_ms", type = "int" },
+        { name = "validation_success", type = "boolean" },
+        { name = "hallucination_score", type = "double" },
+        { name = "hallucination_detected", type = "boolean" },
+        { name = "security_violation", type = "boolean" },
+        { name = "user_query", type = "string" },
+        { name = "model_response", type = "string" },
+        { name = "validation_details", type = "string" }
+      ]
+    },
+    {
+      name     = "contact_lens_analysis"
+      location = "s3://${module.connect_storage_bucket.id}/Analysis/" 
+      columns = [
+        { name = "ContactId", type = "string" },
+        { name = "ConversationCharacteristics", type = "struct<NonTalkTime:struct<TotalDuration:int>,Interruptions:struct<TotalCount:int,TotalDuration:int>,TotalConversationDuration:int>" },
+        { name = "JobStatus", type = "string" },
+        { name = "LanguageCode", type = "string" },
+        { name = "Categories", type = "struct<MatchedCategories:array<string>>" },
+        { name = "Sentiment", type = "struct<OverallSentiment:struct<Agent:float,Customer:float>>" }
+      ]
     }
   ]
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# CloudWatch Metric Stream (System Health to Data Lake)
+# ---------------------------------------------------------------------------------------------------------------------
+resource "aws_cloudwatch_metric_stream" "connect_metrics" {
+  name          = "${var.project_name}-metric-stream"
+  role_arn      = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+  firehose_arn  = module.log_archive_firehose.delivery_stream_arn
+  output_format = "json"
+
+  dynamic "include_filter" {
+    for_each = var.metric_stream_namespaces
+    content {
+      namespace = include_filter.value
+    }
+  }
+
+  tags = var.tags
 }

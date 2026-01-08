@@ -19,6 +19,7 @@ Located in `lambda/bedrock_mcp/validation_agent.py`, the ValidationAgent provide
 - **check_branch_accuracy()**: Verifies branch information
 - **log_hallucination()**: Records hallucinations to DynamoDB
 - **publish_metrics()**: Sends metrics to CloudWatch
+- **log_to_datalake()**: Streams validation events to Kinesis Data Lake
 
 ### Integration Flow
 
@@ -26,16 +27,13 @@ Located in `lambda/bedrock_mcp/validation_agent.py`, the ValidationAgent provide
 User Query → Bedrock → Tool Execution → Response Generation
                                               ↓
                                     ValidationAgent
-                                              ↓
-                        ┌─────────────────────┴─────────────────────┐
-                        ↓                                             ↓
-                  No Hallucination                            Hallucination Detected
-                        ↓                                             ↓
-                  Return Response                    ┌────────────────┴────────────────┐
-                                                     ↓                                  ↓
-                                              Low/Medium Severity              High Severity
-                                                     ↓                                  ↓
-                                            Regenerate Response              Safe Fallback
+                                              |
+      ┌───────────────────────────────────┼─────────────────────────────────┐
+      ↓                                   ↓                                 ↓
+  CloudWatch Metrics                 DynamoDB Logs                     Data Lake Stream
+  - HallucinationDetectionRate       - Detailed Record                 - AI Insights Table
+  - ValidationSuccessRate            - TTL: 90 Days                    - Long-term storage
+  - ValidationLatency                                                  - Athena SQL Access
 ```
 
 ## Detection Algorithms
@@ -115,7 +113,7 @@ Verifies branch details (address, hours, services) match tool data.
 - Non-critical information gaps
 
 **Action:**
-- Log to DynamoDB
+- Log to DynamoDB & Data Lake
 - Publish metrics
 - Continue with response
 
@@ -129,7 +127,7 @@ Verifies branch details (address, hours, services) match tool data.
 - Moderate domain boundary violations
 
 **Action:**
-- Log to DynamoDB
+- Log to DynamoDB & Data Lake
 - Publish metrics
 - Regenerate response with stricter constraints
 - Return regenerated response
@@ -144,7 +142,7 @@ Verifies branch details (address, hours, services) match tool data.
 - Critical inaccuracies that could mislead customers
 
 **Action:**
-- Log to DynamoDB
+- Log to DynamoDB & Data Lake
 - Publish metrics
 - Return safe fallback message
 - Do NOT regenerate (prevent repeated hallucinations)
@@ -180,6 +178,21 @@ Let me connect you with a specialist who can help you with that."
 ```
 
 This triggers an automatic handover to a human agent.
+
+### Data Lake Integration
+
+New in this version is the `ai_insights` pipeline. Every validation event is streamed to Kinesis/Firehose and stored in S3/Glue.
+
+**Query Example (Athena):**
+```sql
+SELECT
+    request_id,
+    hallucination_detected,
+    hallucination_score,
+    latency_ms
+FROM "connect_comprehensive_datalake"."ai_insights"
+WHERE hallucination_detected = true
+```
 
 ## Logging
 

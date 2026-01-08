@@ -177,3 +177,9 @@ variable "agents" {
   }))
   default = {}
 }
+
+variable "metric_stream_namespaces" {
+  description = "List of CloudWatch namespaces to stream to Data Lake"
+  type        = list(string)
+  default     = ["AWS/Connect", "AWS/Lambda", "BedrockValidation"]
+}

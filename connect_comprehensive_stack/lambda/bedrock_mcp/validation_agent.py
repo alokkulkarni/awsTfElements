@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import uuid
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Tuple
 import boto3
@@ -15,6 +16,7 @@ logger = logging.getLogger()
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('AWS_REGION', 'eu-west-2'))
 cloudwatch = boto3.client('cloudwatch', region_name=os.environ.get('AWS_REGION', 'eu-west-2'))
+kinesis = boto3.client('kinesis', region_name=os.environ.get('AWS_REGION', 'eu-west-2'))
 
 
 class ValidationAgent:
@@ -25,6 +27,7 @@ class ValidationAgent:
         self.enabled = os.environ.get('ENABLE_HALLUCINATION_DETECTION', 'true').lower() == 'true'
         self.table_name = os.environ.get('HALLUCINATION_TABLE_NAME', '')
         self.table = dynamodb.Table(self.table_name) if self.table_name else None
+        self.stream_name = os.environ.get('AI_INSIGHTS_STREAM_NAME')
         
         # Allowed domain topics
         self.allowed_topics = [
@@ -40,6 +43,7 @@ class ValidationAgent:
         Main validation entry point.
         Returns: (is_valid: bool, validation_details: dict)
         """
+        start_time = time.time()
         if not self.enabled:
             return (True, {"validation_enabled": False})
         
@@ -135,8 +139,16 @@ class ValidationAgent:
                 session_id=session_id
             )
         
+        # Calculate latency
+        end_time = time.time()
+        latency_ms = int((end_time - start_time) * 1000)
+        validation_details['latency_ms'] = latency_ms
+
         # Publish metrics
         self.publish_metrics(validation_details)
+        
+        # Log to Data Lake
+        self.log_to_datalake(user_query, model_response, validation_details, session_id)
         
         return (is_valid, validation_details)
     
@@ -439,19 +451,6 @@ class ValidationAgent:
             
             # Hallucination detection rate
             hallucination_detected = 1 if validation_details.get('severity') != 'none' else 0
-            cloudwatch.put_metric_data(
-                Namespace=namespace,
-                MetricData=[
-                    {
-                        'MetricName': 'HallucinationDetectionRate',
-                        'Value': hallucination_detected,
-                        'Unit': 'Count',
-                        'Dimensions': [
-                            {'Name': 'Severity', 'Value': validation_details.get('severity', 'unknown')}
-                        ]
-                    }
-                ]
-            )
             
             # Security violation detection
             security_violation_types = ["security_violations", "customer_isolation"]
@@ -460,41 +459,75 @@ class ValidationAgent:
                 for issue in validation_details.get("issues_found", [])
             ) else 0
             
-            cloudwatch.put_metric_data(
-                Namespace=namespace,
-                MetricData=[
-                    {
-                        'MetricName': 'SecurityViolationDetectionRate',
-                        'Value': security_violation_detected,
-                        'Unit': 'Count'
-                    }
-                ]
-            )
-            
             # Validation success rate
             validation_success = 1 if validation_details.get('severity') == 'none' else 0
-            cloudwatch.put_metric_data(
-                Namespace=namespace,
-                MetricData=[
-                    {
-                        'MetricName': 'ValidationSuccessRate',
-                        'Value': validation_success,
-                        'Unit': 'Count'
-                    }
-                ]
-            )
             
-            # Confidence score
+            # Prepare metric data
+            metric_data = [
+                {
+                    'MetricName': 'HallucinationDetectionRate',
+                    'Value': hallucination_detected,
+                    'Unit': 'Count',
+                    'Dimensions': [{'Name': 'Severity', 'Value': validation_details.get('severity', 'unknown')}]
+                },
+                {
+                    'MetricName': 'SecurityViolationDetectionRate',
+                    'Value': security_violation_detected,
+                    'Unit': 'Count'
+                },
+                {
+                    'MetricName': 'ValidationSuccessRate',
+                    'Value': validation_success,
+                    'Unit': 'Count'
+                },
+                {
+                    'MetricName': 'ValidationConfidenceScore',
+                    'Value': validation_details.get('confidence_score', 1.0),
+                    'Unit': 'None'
+                }
+            ]
+            
+            # Include Latency if available
+            if 'latency_ms' in validation_details:
+                metric_data.append({
+                    'MetricName': 'ValidationLatency',
+                    'Value': validation_details['latency_ms'],
+                    'Unit': 'Milliseconds'
+                })
+            
             cloudwatch.put_metric_data(
                 Namespace=namespace,
-                MetricData=[
-                    {
-                        'MetricName': 'ValidationConfidenceScore',
-                        'Value': validation_details.get('confidence_score', 1.0),
-                        'Unit': 'None'
-                    }
-                ]
+                MetricData=metric_data
             )
             
         except Exception as e:
             logger.error(f"Error publishing metrics: {str(e)}")
+
+    def log_to_datalake(self, user_query: str, model_response: str, 
+                       validation_details: Dict[str, Any], session_id: str = None):
+        """Log validation event to Kinesis Data Lake integration."""
+        if not self.stream_name:
+            return
+
+        try:
+            record = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'request_id': str(uuid.uuid4()),
+                'session_id': session_id or 'unknown',
+                'latency_ms': validation_details.get('latency_ms', 0),
+                'validation_success': validation_details.get('severity') == 'none',
+                'hallucination_score': validation_details.get('confidence_score', 1.0),
+                'hallucination_detected': validation_details.get('severity') != 'none',
+                'security_violation': any(i.get('type') in ['security_violations', 'customer_isolation'] for i in validation_details.get('issues_found', [])),
+                'user_query': user_query,
+                'model_response': model_response,
+                'validation_details': json.dumps(validation_details)
+            }
+            
+            kinesis.put_record(
+                StreamName=self.stream_name,
+                Data=json.dumps(record),
+                PartitionKey=session_id or str(uuid.uuid4())
+            )
+        except Exception as e:
+            logger.error(f"Error logging to data lake: {str(e)}")

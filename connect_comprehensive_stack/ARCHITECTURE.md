@@ -70,39 +70,40 @@ The solution leverages a **Hybrid Pattern** combining the flexibility of Bedrock
     *   **Fast Path**: If intent is specialized, the Router invokes the dedicated Child Lambda (e.g., `check_balance.py`) synchronously.
     *   **Smart Path**: If intent is fallback/unknown, the Router invokes Claude 3.5 Sonnet to generate a response.
     *   **Tool Execution**: Bedrock can request tool execution (e.g., `find_nearest_branch`) which is handled by the same Lambda.
+    *   **Validation**: The response is validated by the Validation Agent. Latency, Hallucination Scores, and security violations are logged to the Data Lake.
 
 ## 2. Data Lake Architecture
 
-The solution includes a scalable Serverless Data Lake to analyze Contact Trace Records (CTRs) and Agent Event streams.
+The solution includes a scalable Serverless Data Lake to analyze Contact Trace Records (CTRs), Agent Event streams, and Generative AI Insights.
 
 ### Data Lake Diagram
 
 ```ascii
-                               +-----------------+
-                               |  Amazon Connect |
-                               +--------+--------+
-                                        |
-                 +----------------------+----------------------+
-                 | (CTR Stream)                                | (Agent Events)
-                 v                                             v
-      +----------+-----------+                      +----------+-----------+
-      | Kinesis Data Stream  |                      | Kinesis Data Stream  |
-      | (ctrs)               |                      | (agent-events)       |
-      +----------+-----------+                      +----------+-----------+
-                 |                                             |
-                 v                                             v
-      +----------+-----------+                      +----------+-----------+
-      | Kinesis Firehose     |                      | Kinesis Firehose     |
-      | (Batch & Buffer)     |                      | (Batch & Buffer)     |
-      +----------+-----------+                      +----------+-----------+
-                 |                                             |
-                 +----------------------+----------------------+
+                               +-----------------+             +---------------------+
+                               |  Amazon Connect |             | Bedrock MCP Lambda  |
+                               +--------+--------+             +----------+----------+
+                                        |                                 |
+                 +----------------------+----------------------+          | (AI Insights & Validation Logs)
+                 | (CTR Stream)         | Metric Stream        |          |
+                 v (Agent Events)       v                      v          v
+      +----------+-----------+      +---+----------------+  +----------+----------+
+      | Kinesis Data Stream  |      | CloudWatch Metrics |  | Kinesis Data Stream |
+      | (ctrs & agent-events)|      | (System Health)    |  | (ai-insights)       |
+      +----------+-----------+      +---+----------------+  +----------+----------+
+                 |                      |                              |
+                 v                      v                              v
+      +----------+-----------+      +---+----------------+  +----------+-----------+
+      | Kinesis Firehose     |      | Kinesis Firehose   |  | Kinesis Firehose     |
+      | (Batch & Buffer)     |      | (Batch & Buffer)   |  | (Batch & Buffer)     |
+      +----------+-----------+      +---+----------------+  +----------+-----------+
+                 |                      |                              |
+                 +----------------------+------------------------------+
                                         | Parquet / JSON
                                         v
-                            +-----------+-----------+
-                            |     S3 Data Lake      |
-                            | (Partitioned by Date) |
-                            +-----------+-----------+
+                            +-----------+-----------+                     +------------------+
+                            |     S3 Data Lake      |<--------------------+ Contact Lens     |
+                            | (Partitioned by Date) |                     | (Sentiment/JSON) |
+                            +-----------+-----------+                     +------------------+
                                         |
                             +-----------+-----------+
                             |   AWS Glue Catalog    |
@@ -122,11 +123,13 @@ The solution includes a scalable Serverless Data Lake to analyze Contact Trace R
 
 ### Components
 
-1.  **Kinesis Data Streams**: Real-time ingestion of raw records from Connect.
+1.  **Kinesis Data Streams**: Real-time ingestion of raw records from Connect & Bedrock Lambda.
 2.  **Kinesis Firehose**: Buffers data (e.g., 5MB or 300s) and writes it to S3.
 3.  **S3 Data Lake**: Durable storage with Hive-style partitioning (`year=YYYY/month=MM/day=DD`).
-4.  **AWS Glue**: Metastore defining the schema for `ctrs` and `agent_events`.
+4.  **AWS Glue**: Metastore defining the schema for `ctrs`, `agent_events`, `ai_insights`, and `contact_lens_analysis`.
 5.  **Athena**: Serverless SQL engine to query S3 data directly.
+6.  **Metric Stream**: Continuous stream of CloudWatch metrics (Connect, Lambda, BedrockValidation) to S3.
+7.  **Contact Lens Integration**: Direct Glue table mapping to Contact Lens JSON analysis files in S3.
 
 For example queries, see [ATHENA_QUERIES.md](ATHENA_QUERIES.md).
     *   Customer Queue Flow manages wait with position updates and callback option
