@@ -111,3 +111,69 @@ variable "specialized_intents" {
 # - enable_companion_auth (not used in new architecture)
 # - mock_data (not used in new architecture)
 # - contact_flow_template_path (using bedrock_primary_flow.json.tftpl)
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Data Lake Configuration
+# ---------------------------------------------------------------------------------------------------------------------
+
+variable "datalake_config" {
+  description = "Configuration for the Data Lake (Kinesis streams, prefixes)"
+  type = object({
+    ctr_stream_shard_count          = number
+    ctr_stream_retention_period     = number
+    agent_events_stream_shard_count = number
+    agent_events_stream_retention_period = number
+    ctr_prefix                      = string
+    agent_events_prefix             = string
+  })
+  default = {
+    ctr_stream_shard_count          = 1
+    ctr_stream_retention_period     = 24
+    agent_events_stream_shard_count = 1
+    agent_events_stream_retention_period = 24
+    ctr_prefix                      = "ctr/"
+    agent_events_prefix             = "agent-events/"
+  }
+}
+
+variable "glue_catalog_database_name" {
+    description = "Name of the Glue Catalog Database (defaults to project_name_datalake)"
+    type        = string
+    default     = null
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Agent & Routing Configuration
+# ---------------------------------------------------------------------------------------------------------------------
+
+variable "routing_profiles" {
+  description = "Map of routing profiles to create"
+  type = map(object({
+    description               = string
+    default_outbound_queue_key = string # Key from var.queues
+    media_concurrencies = list(object({
+      channel     = string
+      concurrency = number
+    }))
+    queue_configs = list(object({
+      channel      = string
+      delay        = number
+      priority     = number
+      queue_key    = string # Key from var.queues
+    }))
+  }))
+  default = {}
+}
+
+variable "agents" {
+  description = "Map of agents to create"
+  type = map(object({
+    first_name          = string
+    last_name           = string
+    email               = string
+    password            = string
+    routing_profile_key = string # Key from var.routing_profiles or "basic"
+    security_profile_names = list(string) # e.g. ["Agent", "Admin"]
+  }))
+  default = {}
+}

@@ -189,219 +189,49 @@ data "aws_connect_prompt" "beep" {
 # ---------------------------------------------------------------------------------------------------------------------
 # Routing Profiles
 # ---------------------------------------------------------------------------------------------------------------------
-# Main Routing Profile - Advanced profile with multiple specialized queues
-# - Handles voice (1 concurrent), chat (2 concurrent), and tasks (10 concurrent)
-# - Routes to GeneralAgentQueue only
-# - Enables outbound calling capability
-# - Best for: Senior agents handling general inquiries
-resource "aws_connect_routing_profile" "main" {
-  instance_id = module.connect_instance.id
-  name        = "Main Routing Profile"
-  description = "Profile with outbound calling enabled"
-  default_outbound_queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
 
-  media_concurrencies {
-    channel     = "VOICE"
-    concurrency = 1
-  }
-  
-  media_concurrencies {
-    channel     = "CHAT"
-    concurrency = 2
-  }
-  
-  media_concurrencies {
-    channel     = "TASK"
-    concurrency = 10
-  }
+locals {
+  # Merge created queues with data source queues
+  queue_ids = merge(
+    { for k, v in aws_connect_queue.queues : k => v.queue_id },
+    { "BasicQueue" = data.aws_connect_queue.basic.queue_id }
+  )
 
-  queue_configs {
-    channel  = "VOICE"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+  # Merge security profiles map
+  security_profile_ids = {
+    "Admin"             = data.aws_connect_security_profile.admin.security_profile_id
+    "Agent"             = data.aws_connect_security_profile.agent.security_profile_id
+    "CallCenterManager" = data.aws_connect_security_profile.call_center_manager.security_profile_id
   }
-  
-  queue_configs {
-    channel  = "CHAT"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
-  }
-  
-  tags = var.tags
 }
 
-# Basic Routing Profile - Entry-level profile with multiple queue routing
-# - Handles voice (1 concurrent), chat (2 concurrent), and tasks (1 concurrent)
-# - Routes to both BasicQueue and GeneralAgentQueue
-# - Lower task concurrency for training/learning
-# - Best for: New agents, testing, or simple routing scenarios
-resource "aws_connect_routing_profile" "basic" {
+resource "aws_connect_routing_profile" "this" {
+  for_each = var.routing_profiles
+
   instance_id = module.connect_instance.id
-  name        = "Bedrock Basic Routing Profile"
-  description = "Entry-level profile for basic queue routing"
-  default_outbound_queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+  name        = each.key
+  description = each.value.description
+  
+  default_outbound_queue_id = lookup(local.queue_ids, each.value.default_outbound_queue_key, null)
 
-  media_concurrencies {
-    channel     = "VOICE"
-    concurrency = 1
-  }
-  
-  media_concurrencies {
-    channel     = "CHAT"
-    concurrency = 2
-  }
-  
-  media_concurrencies {
-    channel     = "TASK"
-    concurrency = 1
+  dynamic "media_concurrencies" {
+    for_each = each.value.media_concurrencies
+    content {
+      channel     = media_concurrencies.value.channel
+      concurrency = media_concurrencies.value.concurrency
+    }
   }
 
-  # BasicQueue configuration for both VOICE and CHAT
-  queue_configs {
-    channel  = "VOICE"
-    delay    = 0
-    priority = 1
-    queue_id = data.aws_connect_queue.basic.queue_id
-  }
-  
-  queue_configs {
-    channel  = "CHAT"
-    delay    = 0
-    priority = 1
-    queue_id = data.aws_connect_queue.basic.queue_id
+  dynamic "queue_configs" {
+    for_each = each.value.queue_configs
+    content {
+      channel  = queue_configs.value.channel
+      delay    = queue_configs.value.delay
+      priority = queue_configs.value.priority
+      queue_id = lookup(local.queue_ids, queue_configs.value.queue_key, null)
+    }
   }
 
-  # GeneralAgentQueue configuration for both VOICE and CHAT
-  queue_configs {
-    channel  = "VOICE"
-    delay    = 0
-    priority = 2
-    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
-  }
-  
-  queue_configs {
-    channel  = "CHAT"
-    delay    = 0
-    priority = 2
-    queue_id = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
-  }
-  
-  tags = var.tags
-}
-
-resource "aws_connect_routing_profile" "account" {
-  instance_id = module.connect_instance.id
-  name        = "Account Services Routing Profile"
-  description = "Profile for account services agents"
-  default_outbound_queue_id = aws_connect_queue.queues["AccountQueue"].queue_id
-
-  media_concurrencies {
-    channel     = "VOICE"
-    concurrency = 1
-  }
-  
-  media_concurrencies {
-    channel     = "CHAT"
-    concurrency = 2
-  }
-  
-  media_concurrencies {
-    channel     = "TASK"
-    concurrency = 10
-  }
-
-  queue_configs {
-    channel  = "VOICE"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["AccountQueue"].queue_id
-  }
-  
-  queue_configs {
-    channel  = "CHAT"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["AccountQueue"].queue_id
-  }
-  
-  tags = var.tags
-}
-
-resource "aws_connect_routing_profile" "lending" {
-  instance_id = module.connect_instance.id
-  name        = "Lending Services Routing Profile"
-  description = "Profile for lending services agents"
-  default_outbound_queue_id = aws_connect_queue.queues["LendingQueue"].queue_id
-
-  media_concurrencies {
-    channel     = "VOICE"
-    concurrency = 1
-  }
-  
-  media_concurrencies {
-    channel     = "CHAT"
-    concurrency = 2
-  }
-  
-  media_concurrencies {
-    channel     = "TASK"
-    concurrency = 10
-  }
-
-  queue_configs {
-    channel  = "VOICE"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["LendingQueue"].queue_id
-  }
-  
-  queue_configs {
-    channel  = "CHAT"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["LendingQueue"].queue_id
-  }
-  
-  tags = var.tags
-}
-
-resource "aws_connect_routing_profile" "onboarding" {
-  instance_id = module.connect_instance.id
-  name        = "Onboarding Services Routing Profile"
-  description = "Profile for onboarding services agents"
-  default_outbound_queue_id = aws_connect_queue.queues["OnboardingQueue"].queue_id
-
-  media_concurrencies {
-    channel     = "VOICE"
-    concurrency = 1
-  }
-  
-  media_concurrencies {
-    channel     = "CHAT"
-    concurrency = 2
-  }
-  
-  media_concurrencies {
-    channel     = "TASK"
-    concurrency = 10
-  }
-
-  queue_configs {
-    channel  = "VOICE"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["OnboardingQueue"].queue_id
-  }
-  
-  queue_configs {
-    channel  = "CHAT"
-    delay    = 0
-    priority = 1
-    queue_id = aws_connect_queue.queues["OnboardingQueue"].queue_id
-  }
-  
   tags = var.tags
 }
 
@@ -414,120 +244,23 @@ data "aws_connect_queue" "basic" {
 # ---------------------------------------------------------------------------------------------------------------------
 # Agent Users
 # ---------------------------------------------------------------------------------------------------------------------
-# Agent 1 - Uses Basic Routing Profile (entry-level)
-resource "aws_connect_user" "agent_basic" {
+
+resource "aws_connect_user" "this" {
+  for_each = var.agents
+
   instance_id        = module.connect_instance.id
-  name               = "agent1"
-  password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.basic.routing_profile_id
+  name               = each.key
+  password           = each.value.password
+  routing_profile_id = aws_connect_routing_profile.this[each.value.routing_profile_key].routing_profile_id
+  
   security_profile_ids = [
-    data.aws_connect_security_profile.admin.security_profile_id
+    for name in each.value.security_profile_names : local.security_profile_ids[name]
   ]
 
   identity_info {
-    first_name = "Agent"
-    last_name  = "One"
-    email      = "agent1@example.com"
-  }
-
-  phone_config {
-    phone_type  = "SOFT_PHONE"
-    auto_accept = true
-  }
-
-  tags = var.tags
-}
-
-# Agent 2 - Call Center Manager & Main Routing Profile
-# Assigned CallCenterManager security profile to allow:
-# - Monitoring (Listen)
-# - Barge-in (3-way)
-# - Take Over (Disconnect Agent)
-resource "aws_connect_user" "agent_main" {
-  instance_id        = module.connect_instance.id
-  name               = "agent2"
-  password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.main.routing_profile_id
-  security_profile_ids = [
-    data.aws_connect_security_profile.call_center_manager.security_profile_id
-  ]
-
-  identity_info {
-    first_name = "Agent"
-    last_name  = "Two"
-    email      = "agent2@example.com"
-  }
-
-  phone_config {
-    phone_type  = "SOFT_PHONE"
-    auto_accept = true
-  }
-
-  tags = var.tags
-}
-
-# Agent 3 - Non-admin, Account Services profile
-resource "aws_connect_user" "agent3" {
-  instance_id        = module.connect_instance.id
-  name               = "agent3"
-  password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.account.routing_profile_id
-  security_profile_ids = [
-    data.aws_connect_security_profile.agent.security_profile_id
-  ]
-
-  identity_info {
-    first_name = "Agent"
-    last_name  = "Three"
-    email      = "agent3@example.com"
-  }
-
-  phone_config {
-    phone_type  = "SOFT_PHONE"
-    auto_accept = true
-  }
-
-  tags = var.tags
-}
-
-# Agent 4 - Non-admin, Lending Services profile
-resource "aws_connect_user" "agent4" {
-  instance_id        = module.connect_instance.id
-  name               = "agent4"
-  password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.lending.routing_profile_id
-  security_profile_ids = [
-    data.aws_connect_security_profile.agent.security_profile_id
-  ]
-
-  identity_info {
-    first_name = "Agent"
-    last_name  = "Four"
-    email      = "agent4@example.com"
-  }
-
-  phone_config {
-    phone_type  = "SOFT_PHONE"
-    auto_accept = true
-  }
-
-  tags = var.tags
-}
-
-# Agent 5 - Non-admin, Onboarding Services profile
-resource "aws_connect_user" "agent5" {
-  instance_id        = module.connect_instance.id
-  name               = "agent5"
-  password           = "Password123!"
-  routing_profile_id = aws_connect_routing_profile.onboarding.routing_profile_id
-  security_profile_ids = [
-    data.aws_connect_security_profile.agent.security_profile_id
-  ]
-
-  identity_info {
-    first_name = "Agent"
-    last_name  = "Five"
-    email      = "agent5@example.com"
+    first_name = each.value.first_name
+    last_name  = each.value.last_name
+    email      = each.value.email
   }
 
   phone_config {
@@ -2696,4 +2429,99 @@ resource "aws_cloudwatch_log_subscription_filter" "lex_logs" {
   filter_pattern  = ""
   destination_arn = module.log_archive_firehose.delivery_stream_arn
   role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+}
+
+# --------------------------------------------------------------------------------------------------------------------- 
+# DATA LAKE IMPLEMENTATION
+# ---------------------------------------------------------------------------------------------------------------------
+
+module "datalake_bucket" {
+  source           = "../resources/s3"
+  bucket_name      = "${var.project_name}-datalake-${data.aws_caller_identity.current.account_id}"
+  enable_lifecycle = true
+  tags             = var.tags
+}
+
+module "kinesis_ctr" {
+  source           = "../resources/kinesis_stream"
+  name             = "${var.project_name}-ctr-stream"
+  shard_count      = var.datalake_config.ctr_stream_shard_count
+  retention_period = var.datalake_config.ctr_stream_retention_period
+  tags             = var.tags
+}
+
+module "kinesis_agent_events" {
+  source           = "../resources/kinesis_stream"
+  name             = "${var.project_name}-agent-events-stream"
+  shard_count      = var.datalake_config.agent_events_stream_shard_count
+  retention_period = var.datalake_config.agent_events_stream_retention_period
+  tags             = var.tags
+}
+
+module "firehose_ctr" {
+  source                 = "../resources/firehose"
+  project_name           = "${var.project_name}-ctr"
+  destination_bucket_arn = module.datalake_bucket.arn
+  destination_prefix     = var.datalake_config.ctr_prefix
+  kinesis_source_arn     = module.kinesis_ctr.arn
+  tags                   = var.tags
+}
+
+module "firehose_agent_events" {
+  source                 = "../resources/firehose"
+  project_name           = "${var.project_name}-agent"
+  destination_bucket_arn = module.datalake_bucket.arn
+  destination_prefix     = var.datalake_config.agent_events_prefix
+  kinesis_source_arn     = module.kinesis_agent_events.arn
+  tags                   = var.tags
+}
+
+resource "aws_connect_instance_storage_config" "ctr_stream" {
+  instance_id   = module.connect_instance.id
+  resource_type = "CONTACT_TRACE_RECORDS"
+  
+  storage_config {
+    storage_type = "KINESIS_STREAM"
+    kinesis_stream_config {
+      stream_arn = module.kinesis_ctr.arn
+    }
+  }
+}
+
+resource "aws_connect_instance_storage_config" "agent_events_stream" {
+  instance_id   = module.connect_instance.id
+  resource_type = "AGENT_EVENTS"
+
+  storage_config {
+    storage_type = "KINESIS_STREAM"
+    kinesis_stream_config {
+      stream_arn = module.kinesis_agent_events.arn
+    }
+  }
+}
+
+module "glue_datalake" {
+  source        = "../resources/glue"
+  database_name = var.glue_catalog_database_name != null ? var.glue_catalog_database_name : "${replace(var.project_name, "-", "_")}_datalake"
+  tables = [
+    {
+      name     = "ctrs"
+      location = "s3://${module.datalake_bucket.id}/ctr/"
+      columns = [
+        { name = "ContactId", type = "string" },
+        { name = "Agent", type = "struct<ARN:string,AfterContactWorkDuration:int,AfterContactWorkStartTimestamp:string,AfterContactWorkEndTimestamp:string,AgentInteractionDuration:int,ConnectedToAgentTimestamp:string,CustomerHoldDuration:int,HierarchyGroups:struct<Level1:struct<ARN:string,GroupName:string>,Level2:struct<ARN:string,GroupName:string>,Level3:struct<ARN:string,GroupName:string>,Level4:struct<ARN:string,GroupName:string>,Level5:struct<ARN:string,GroupName:string>>,LongestHoldDuration:int,NumberOfHolds:int,RoutingProfile:struct<ARN:string,Name:string>,Username:string>" },
+        { name = "Queue", type = "struct<ARN:string,DequeueTimestamp:string,Duration:int,EnqueueTimestamp:string,Name:string>" }
+      ]
+    },
+    {
+      name     = "agent_events"
+      location = "s3://${module.datalake_bucket.id}/agent-events/"
+      columns = [
+        { name = "AgentARN", type = "string" },
+        { name = "CurrentAgentSnapshot", type = "struct<AgentStatus:struct<ARN:string,Name:string,StartTimestamp:string>,Configuration:struct<AgentHierarchyGroups:string,FirstName:string,LastName:string,RoutingProfile:struct<ARN:string,DefaultOutboundQueue:struct<ARN:string,Name:string>,InboundQueues:array<struct<ARN:string,Name:string>>,Name:string>,Username:string>,Contacts:array<struct<Channel:string,ConnectedToAgentTimestamp:string,ContactId:string,InitialContactId:string,InitiationMethod:string,Queue:struct<ARN:string,Name:string,Timestamp:string>,State:string,StateStartTimestamp:string>>>" },
+        { name = "EventTimestamp", type = "string" },
+        { name = "EventType", type = "string" }
+      ]
+    }
+  ]
 }

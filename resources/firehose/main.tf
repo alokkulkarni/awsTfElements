@@ -2,6 +2,15 @@ resource "aws_kinesis_firehose_delivery_stream" "log_stream" {
   name        = "${var.project_name}-firehose-logs"
   destination = "extended_s3"
 
+  # Optional Kinesis Source Configuration
+  dynamic "kinesis_source_configuration" {
+    for_each = var.kinesis_source_arn != null ? [1] : []
+    content {
+      kinesis_stream_arn = var.kinesis_source_arn
+      role_arn           = aws_iam_role.firehose_delivery.arn
+    }
+  }
+
   extended_s3_configuration {
     role_arn   = aws_iam_role.firehose_delivery.arn
     bucket_arn = var.destination_bucket_arn
@@ -98,6 +107,16 @@ resource "aws_iam_policy" "firehose_delivery_policy" {
                 "aws:RequestedRegion": data.aws_region.current.name
             }
         } 
+      },
+      {
+        Action = [
+          "kinesis:DescribeStream",
+          "kinesis:GetShardIterator",
+          "kinesis:GetRecords",
+          "kinesis:ListShards"
+        ]
+        Effect = "Allow"
+        Resource = var.kinesis_source_arn != null ? [var.kinesis_source_arn] : []
       },
       {
          Action = [

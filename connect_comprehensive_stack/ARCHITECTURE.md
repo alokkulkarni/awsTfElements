@@ -1,16 +1,16 @@
 # Connect Comprehensive Stack Architecture
 
-This document provides a detailed architectural overview of the **Connect Comprehensive Stack**, a production-ready Amazon Connect solution featuring Bedrock-primary conversational AI, intelligent tool calling with FastMCP 2.0, real-time hallucination detection, and seamless agent handover.
+This document provides a detailed architectural overview of the **Connect Comprehensive Stack**, a production-ready Amazon Connect solution featuring Bedrock-primary conversational AI, intelligent tool calling with FastMCP 2.0, real-time hallucination detection, seamless agent handover, and a scalable **Data Lake** for advanced analytics.
 
 ## 1. High-Level Architecture (Hybrid)
 
 The solution leverages a **Hybrid Pattern** combining the flexibility of Bedrock-based Generative AI with the speed and reliability of deterministic Lambdas. The main **Bedrock MCP Lambda** serves as an intelligent router:
 *   **Specialized Intents** (e.g., Balance Check, Statements) are dispatched to lightweight, dedicated Lambdas for sub-second response times and zero token costs.
-*   **General/Complex Queries** are routed to Claude 3.5 Sonnet (via Bedrock) for contextual understanding and reasoning.
+*   **Generative Path** (Complex Queries) queries are routed to Claude 3.5 Sonnet (via Bedrock) for contextual understanding and reasoning.
 
 ### Architecture Diagram
 
-```
+```ascii
                                        +-------------------------------------------------------------------------+
                                        |                       AWS Cloud (Zero Trust)                            |
                                        |                                                                         |
@@ -24,7 +24,7 @@ The solution leverages a **Hybrid Pattern** combining the flexibility of Bedrock
                                        |   +---------+---------+                                                 |
                                        |   |                   |                                                 |
                                        |   |   Contact Flow    |                                                 |
-                                       |   | (Bedrock Primary) |                                                 |
+                                       |   |                   |                                                 |
                                        |   +----+-------+------+                                                 |
                                        |        |       |                                                        |
                                        |        v       +---> (Error) --> Agent Queue                            |
@@ -40,23 +40,24 @@ The solution leverages a **Hybrid Pattern** combining the flexibility of Bedrock
                                        |                                                    | Lambda (Router) |  |
                                        |                                                    +--------+--------+  |
                                        |                                                             |           |
-                                       |                       +-------------------------------------+-----------------------------------+
-                                       |                       |                                     |                                   |
-                                       |                       v (ChatIntent)                        v (Specialized)                     |
-                                       |         +-------------+-------------+             +---------+----------+                        |
-                                       |         |                           |             |                    |                        |
-                                       |         |     Amazon Bedrock        |             | Specialized Lambdas|                        |
-                                       |         | (Generative "Smart Path") |             | ("Fast Path")      |                        |
-                                       |         +-------------+-------------+             +---------+----------+                        |
-                                       |                       |                                     |                                   |
-                                       |         +-------------+-------------+                       |                                   |
-                                       |         |             |             |                       v                                   |
-                                       |         v             v             v               +-------+------+                            |
-                                       | +-------+----+  +-----+------+  +---+--------+      |              |                            |
-                                       | | FastMCP    |  | Validation |  | Handover   |      | Core Banking |                            |
-                                       | | Tools      |  | Agent      |  | Detection  |      | APIs         |                            |
-                                       | +------------+  +------------+  +------------+      |              |                            |
-                                       |                                                     +--------------+                            |
+                                       |                       +-------------------------------------+           |
+                                       |                       |                                     |           |
+                                       |             (Complexity > Threshold)                  (Specialized)     |
+                                       |                       |                                     |           |
+                                       |         +-------------v-------------+             +---------v----------+|
+                                       |         |                           |             |                    ||
+                                       |         |     Amazon Bedrock        |             | Specialized Lambdas||
+                                       |         | (Generative "Smart Path") |             | ("Fast Path")      ||
+                                       |         +-------------+-------------+             +---------+----------+|
+                                       |                       |                                     |           |
+                                       |         +-------------+-------------+                       |           |
+                                       |         |             |             |                       v           |
+                                       |         v             v             v               +-------+------+    |
+                                       | +-------+----+  +-----+------+  +---+--------+      |              |    |
+                                       | | FastMCP    |  | Validation |  | Handover   |      | Core Banking |    |
+                                       | | Tools      |  | Agent      |  | Detection  |      | APIs         |    |
+                                       | +------------+  +------------+  +------------+      |              |    |
+                                       |                                                     +--------------+    |
                                        +-------------------------------------------------------------------------+
 ```
 
@@ -64,40 +65,70 @@ The solution leverages a **Hybrid Pattern** combining the flexibility of Bedrock
 
 1.  **Ingestion**: User interacts via Voice or Chat. Amazon Connect handles the session.
 2.  **Orchestration**: Connect invokes the Bedrock Primary Contact Flow.
-3.  **Pass-through**: Lex V2 receives ALL user input via FallbackIntent and immediately passes it to Lambda.
-4.  **Primary Fulfillment**:
-    *   Lambda extracts user input and conversation history from Lex event
-    *   Lambda invokes Claude 3.5 Sonnet with:
-        *   System prompt (banking service agent for account opening and debit cards)
-        *   Conversation history for context
-        *   FastMCP 2.0 tool definitions
-    *   Bedrock processes the request and either:
-        *   Returns a direct text response, OR
-        *   Requests tool execution (tool_use)
-5.  **Tool Execution**: When Bedrock requests tools:
-    *   Lambda executes the requested FastMCP 2.0 tool:
-        *   `get_branch_account_opening_info`: Branch account opening process and documents
-        *   `get_digital_account_opening_info`: Digital account opening process and documents
-        *   `get_debit_card_info`: Debit card types, features, and ordering
-        *   `find_nearest_branch`: Location-based branch finder
-    *   Tool results are sent back to Bedrock for response composition
-6.  **Validation**: ValidationAgent checks the response for hallucinations:
-    *   Compares response facts against tool results
-    *   Checks domain boundaries
-    *   Validates document and branch accuracy
-    *   Logs hallucinations to DynamoDB with severity levels
-    *   Publishes metrics to CloudWatch
-    *   Takes action based on severity (regenerate or safe fallback)
-7.  **Handover Detection**: Lambda analyzes conversation for handover triggers:
-    *   Explicit agent requests ("I need an agent")
-    *   Frustration indicators ("this is useless")
-    *   Repeated queries (same intent 3+ times)
-    *   Capability limitations
-    *   Tool failures exceeding threshold
-8.  **Agent Handover**: When handover is needed:
-    *   Lambda formats conversation summary and context
-    *   Returns TransferToAgent intent to Lex
-    *   Contact Flow routes to GeneralAgentQueue
+3.  **Pass-through**: Lex V2 receives user input. If it matches a Specialized Intent (e.g. "Check Balance"), Lex identifies it.
+4.  **Routing (Lambda)**:
+    *   **Fast Path**: If intent is specialized, the Router invokes the dedicated Child Lambda (e.g., `check_balance.py`) synchronously.
+    *   **Smart Path**: If intent is fallback/unknown, the Router invokes Claude 3.5 Sonnet to generate a response.
+    *   **Tool Execution**: Bedrock can request tool execution (e.g., `find_nearest_branch`) which is handled by the same Lambda.
+
+## 2. Data Lake Architecture
+
+The solution includes a scalable Serverless Data Lake to analyze Contact Trace Records (CTRs) and Agent Event streams.
+
+### Data Lake Diagram
+
+```ascii
+                               +-----------------+
+                               |  Amazon Connect |
+                               +--------+--------+
+                                        |
+                 +----------------------+----------------------+
+                 | (CTR Stream)                                | (Agent Events)
+                 v                                             v
+      +----------+-----------+                      +----------+-----------+
+      | Kinesis Data Stream  |                      | Kinesis Data Stream  |
+      | (ctrs)               |                      | (agent-events)       |
+      +----------+-----------+                      +----------+-----------+
+                 |                                             |
+                 v                                             v
+      +----------+-----------+                      +----------+-----------+
+      | Kinesis Firehose     |                      | Kinesis Firehose     |
+      | (Batch & Buffer)     |                      | (Batch & Buffer)     |
+      +----------+-----------+                      +----------+-----------+
+                 |                                             |
+                 +----------------------+----------------------+
+                                        | Parquet / JSON
+                                        v
+                            +-----------+-----------+
+                            |     S3 Data Lake      |
+                            | (Partitioned by Date) |
+                            +-----------+-----------+
+                                        |
+                            +-----------+-----------+
+                            |   AWS Glue Catalog    |
+                            | (Database & Tables)   |
+                            +-----------+-----------+
+                                        |
+                            +-----------+-----------+
+                            |     Amazon Athena     |
+                            |    (SQL Interface)    |
+                            +-----------+-----------+
+                                        |
+                            +-----------+-----------+
+                            |   Amazon QuickSight   |
+                            |    (Visualization)    |
+                            +-----------------------+
+```
+
+### Components
+
+1.  **Kinesis Data Streams**: Real-time ingestion of raw records from Connect.
+2.  **Kinesis Firehose**: Buffers data (e.g., 5MB or 300s) and writes it to S3.
+3.  **S3 Data Lake**: Durable storage with Hive-style partitioning (`year=YYYY/month=MM/day=DD`).
+4.  **AWS Glue**: Metastore defining the schema for `ctrs` and `agent_events`.
+5.  **Athena**: Serverless SQL engine to query S3 data directly.
+
+For example queries, see [ATHENA_QUERIES.md](ATHENA_QUERIES.md).
     *   Customer Queue Flow manages wait with position updates and callback option
 9.  **Monitoring**: CloudWatch tracks:
     *   Hallucination detection rates

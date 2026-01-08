@@ -32,6 +32,12 @@ variable "processing_lambda_arn" {
     default = ""
 }
 
+variable "kinesis_source_arn" {
+  description = "The ARN of the source Kinesis Data Stream (optional)"
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
