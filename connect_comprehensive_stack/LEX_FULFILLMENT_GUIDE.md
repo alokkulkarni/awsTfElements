@@ -2,25 +2,27 @@
 
 This document details how the **Connect Comprehensive Stack** handles automated customer servicing, API integrations, and customer validation using Amazon Lex and AWS Lambda.
 
-## 1. Architecture Overview
+## 1. Architecture Overview (Hybrid Model)
 
-The solution uses a **Hub-and-Spoke** fulfillment model where Amazon Lex acts as the conversational interface, and a central AWS Lambda function (`lex_fallback`) acts as the "Brain".
+The solution uses a **Hybrid Hub-and-Spoke** fulfillment model. Amazon Lex captures user intent and invokes a central **Router Lambda**. This router intelligently dispatches requests either to specialized, deterministic Lambdas (for speed/cost) or to Amazon Bedrock (for complex/generative tasks).
 
 ```mermaid
 graph TD
     User((User)) <--> Connect[Amazon Connect]
     Connect <--> Lex[Amazon Lex V2]
-    Lex <--> Lambda[Fulfillment Lambda]
-    Lambda <--> Bedrock[Amazon Bedrock]
-    Lambda <--> APIs[External APIs (CRM/Banking)]
-    Lambda <--> DynamoDB[Customer Data/Logs]
+    Lex <--> Router[Router Lambda (Bedrock MCP)]
+    
+    Router -- "CheckBalance / GetStatement" --> Deterministic[Specialized Lambdas]
+    Router -- "Complex / General Query" --> Bedrock[Amazon Bedrock (Claude 3.5)]
+    
+    Deterministic <--> APIs[Core Banking APIs]
+    Bedrock <--> Tools[FastMCP Tools]
 ```
 
-### The "Brain" (Lambda)
-The Lambda function receives every intent request from Lex (except those explicitly configured to just return text). It decides whether to:
-1.  **Fulfill**: Fetch data and answer the user (e.g., "Your balance is $500").
-2.  **Validate**: Challenge the user for identity (e.g., "Please say your PIN").
-3.  **Transfer**: Signal Lex/Connect to hand off to a human agent.
+### The "Router" (Main Lambda)
+The central Lambda function (`bedrock_mcp`) receives every intent request from Lex. It acts as a traffic controller:
+1.  **Direct Dispatch**: If the intent is known and specialized (e.g., `CheckBalance`), it synchronously invokes a lightweight child Lambda.
+2.  **Generative AI**: If the intent is `ChatIntent` or `FallbackIntent`, it invokes Amazon Bedrock using conversational context.
 
 ---
 

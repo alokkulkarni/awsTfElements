@@ -1277,7 +1277,36 @@ def lambda_handler(event, context):
             input_transcript = event.get('transcriptions', [{}])[0].get('transcription', '') if event.get('transcriptions') else ''
         
         logger.info(f"Processing request - Intent: {intent_name}, Input: {input_transcript}")
+
+        # ---------------------------------------------------------------------
+        # DISPATCH TO SPECIALIZED LAMBDAS (Hybrid Architecture)
+        # ---------------------------------------------------------------------
+        # If the intent matches one of our specialized, deterministic intents,
+        # we bypass Bedrock and invoke the specific Lambda directly.
+        specialized_handler_arn = os.environ.get(f"LAMBDA_{intent_name.upper()}")
         
+        if specialized_handler_arn:
+            logger.info(f"DISPATCHING to specialized Lambda for intent: {intent_name}")
+            try:
+                # Invoke the child Lambda synchronously
+                client = boto3.client('lambda')
+                response = client.invoke(
+                    FunctionName=specialized_handler_arn,
+                    InvocationType='RequestResponse',
+                    Payload=json.dumps(event)
+                )
+                
+                # Parse and return the response from the child Lambda
+                payload = json.loads(response['Payload'].read())
+                logger.info(f"Received response from specialized Lambda: {json.dumps(payload)}")
+                return payload
+                
+            except Exception as e:
+                logger.error(f"Error invoking specialized Lambda {specialized_handler_arn}: {str(e)}")
+                # Fallback to Bedrock if dispatch fails? Or return error?
+                # For now, let's treat it as a technical error and let the main handler handle it via TransferToAgent logic below
+                pass
+
         # Handle empty/blank input (silence timeout)
         if not input_transcript or not input_transcript.strip():
             # Check if this is the first interaction - need to introduce Emma Thompson

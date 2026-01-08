@@ -2,9 +2,11 @@
 
 This document provides a detailed architectural overview of the **Connect Comprehensive Stack**, a production-ready Amazon Connect solution featuring Bedrock-primary conversational AI, intelligent tool calling with FastMCP 2.0, real-time hallucination detection, and seamless agent handover.
 
-## 1. High-Level Architecture
+## 1. High-Level Architecture (Hybrid)
 
-The solution leverages a **Bedrock-Primary** architecture where Amazon Connect acts as the central communication hub, with Amazon Lex serving as a simple pass-through to AWS Lambda. The Lambda function orchestrates Claude 3.5 Sonnet (via Amazon Bedrock) as the primary conversational AI engine, executing FastMCP 2.0 tools, validating responses for hallucinations, and managing intelligent agent handover.
+The solution leverages a **Hybrid Pattern** combining the flexibility of Bedrock-based Generative AI with the speed and reliability of deterministic Lambdas. The main **Bedrock MCP Lambda** serves as an intelligent router:
+*   **Specialized Intents** (e.g., Balance Check, Statements) are dispatched to lightweight, dedicated Lambdas for sub-second response times and zero token costs.
+*   **General/Complex Queries** are routed to Claude 3.5 Sonnet (via Bedrock) for contextual understanding and reasoning.
 
 ### Architecture Diagram
 
@@ -27,73 +29,34 @@ The solution leverages a **Bedrock-Primary** architecture where Amazon Connect a
                                        |        |       |                                                        |
                                        |        v       +---> (Error) --> Agent Queue                            |
                                        |   +----+----+                                                           |
-                                       |   |         |   ALL Input (FallbackIntent)                              |
+                                       |   |         |   ALL Intents                                             |
                                        |   | Lex V2  +------------------------------------------------+          |
-                                       |   | (Pass-  |                                                |          |
-                                       |   | through)|                                                |          |
+                                       |   |         |                                                |          |
                                        |   +---------+                                                |          |
                                        |                                                              v          |
                                        |                                                    +---------+-------+  |
                                        |                                                    |                 |  |
                                        |                                                    | Bedrock MCP     |  |
-                                       |                                                    | Lambda          |  |
-                                       |                                                    | (Primary)       |  |
+                                       |                                                    | Lambda (Router) |  |
                                        |                                                    +--------+--------+  |
                                        |                                                             |           |
-                                       |                    +----------------------------------------+           |
-                                       |                    |                                                    |
-                                       |                    v                                                    |
-                                       |          +---------+---------+                                          |
-                                       |          |                   |                                          |
-                                       |          |  Amazon Bedrock   |                                          |
-                                       |          | Claude 3.5 Sonnet |                                          |
-                                       |          | (Conversational   |                                          |
-                                       |          |  AI + Tools)      |                                          |
-                                       |          +---------+---------+                                          |
-                                       |                    |                                                    |
-                                       |       +------------+-------------+                                      |
-                                       |       |                          |                                      |
-                                       |       v                          v                                      |
-                                       | +-----+------+          +--------+--------+                             |
-                                       | |  FastMCP   |          | Validation      |                             |
-                                       | |  2.0 Tools |          | Agent           |                             |
-                                       | |            |          | (Hallucination  |                             |
-                                       | | - Account  |          |  Detection)     |                             |
-                                       | | - Cards    |          +--------+--------+                             |
-                                       | | - Branch   |                   |                                      |
-                                       | +-----+------+                   v                                      |
-                                       |       |              +-----------+-----------+                          |
-                                       |       |              |  DynamoDB             |                          |
-                                       |       |              |  (Hallucination Logs) |                          |
-                                       |       |              +-----------------------+                          |
-                                       |       |                                                                 |
-                                       |       v                                                                 |
-                                       | +-----+------+                                                          |
-                                       | | Handover   |                                                          |
-                                       | | Detection  |                                                          |
-                                       | +-----+------+                                                          |
-                                       |       |                                                                 |
-                                       |       v (TransferToAgent)                                               |
-                                       |   +---+---------------+       +-------------------------------------+   |
-                                       |   |                   |       |                                     |   |
-                                       |   |    Agent Queue    |       |  Customer Queue Flow                |   |
-                                       |   | (GeneralAgent)    |<------+  - Position Updates                 |   |
-                                       |   |                   |       |  - Callback Option                  |   |
-                                       |   +---------+---------+       +-------------------------------------+   |
-                                       |             |                                                           |
-                                       |             v                                                           |
-      +--------+                       |   +---------+---------+       +-------------------------------------+   |
-      |        |   HTTPS (WAF)         |   |                   |       |                                     |   |
-      | Agent  +<--------------------------+   Human Agent     |       |    S3 (Recordings/Transcripts/CTR)  |   |
-      |        |   Custom CCP          |   |                   |       |          (KMS Encrypted)            |   |
-      +--------+                       |   +-------------------+       +-------------------------------------+   |
-                                       |                                                                         |
-                                       |   +-------------------+       +-------------------------------------+   |
-                                       |   |                   |       |                                     |   |
-                                       |   |  CloudWatch       |<------+  SNS (Alarm Notifications)         |   |
-                                       |   |  Alarms           |       |                                     |   |
-                                       |   +-------------------+       +-------------------------------------+   |
-                                       |                                                                         |
+                                       |                       +-------------------------------------+-----------------------------------+
+                                       |                       |                                     |                                   |
+                                       |                       v (ChatIntent)                        v (Specialized)                     |
+                                       |         +-------------+-------------+             +---------+----------+                        |
+                                       |         |                           |             |                    |                        |
+                                       |         |     Amazon Bedrock        |             | Specialized Lambdas|                        |
+                                       |         | (Generative "Smart Path") |             | ("Fast Path")      |                        |
+                                       |         +-------------+-------------+             +---------+----------+                        |
+                                       |                       |                                     |                                   |
+                                       |         +-------------+-------------+                       |                                   |
+                                       |         |             |             |                       v                                   |
+                                       |         v             v             v               +-------+------+                            |
+                                       | +-------+----+  +-----+------+  +---+--------+      |              |                            |
+                                       | | FastMCP    |  | Validation |  | Handover   |      | Core Banking |                            |
+                                       | | Tools      |  | Agent      |  | Detection  |      | APIs         |                            |
+                                       | +------------+  +------------+  +------------+      |              |                            |
+                                       |                                                     +--------------+                            |
                                        +-------------------------------------------------------------------------+
 ```
 

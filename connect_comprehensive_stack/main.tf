@@ -932,8 +932,8 @@ module "bedrock_mcp_lambda" {
   # Use archive hash to trigger Lambda code updates deterministically
   source_code_hash = data.archive_file.bedrock_mcp_zip.output_base64sha256
 
-  environment_variables = {
-    # Bedrock Configuration - Use inference profile ARN for cross-region on-demand access
+  environment_variables = merge({
+    # Bedrock Configuration
     BEDROCK_MODEL_ID                = "arn:aws:bedrock:us-east-1:395402194296:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0"
     BEDROCK_REGION                  = var.bedrock_region
     
@@ -952,7 +952,11 @@ module "bedrock_mcp_lambda" {
     QUEUE_ARN_ACCOUNT    = aws_connect_queue.queues["AccountQueue"].arn
     QUEUE_ARN_LENDING    = aws_connect_queue.queues["LendingQueue"].arn
     QUEUE_ARN_ONBOARDING = aws_connect_queue.queues["OnboardingQueue"].arn
-  }
+  }, {
+    # Specialized Lambda ARNs (Dynamic)
+    for k, v in aws_lambda_function.specialized : 
+    "LAMBDA_${upper(k)}" => v.arn
+  })
 
   tags = var.tags
 
@@ -1027,6 +1031,85 @@ resource "aws_lambda_provisioned_concurrency_config" "bedrock_mcp_pc" {
     aws_lambda_alias.bedrock_mcp_live,
     null_resource.bedrock_mcp_update_alias
   ]
+}
+
+# =====================================================================================================================
+# Specialized Lambdas & Intents (Hybrid Architecture)
+# =====================================================================================================================
+
+# 1. Archive new Lambda source code
+data "archive_file" "specialized_lambda_zip" {
+  for_each    = var.specialized_intents
+  type        = "zip"
+  source_dir  = each.value.lambda.source_dir
+  output_path = "${path.module}/.terraform/archive/${each.key}.zip"
+}
+
+# 2. Create specialized Lambda functions
+resource "aws_lambda_function" "specialized" {
+  for_each      = var.specialized_intents
+  filename      = data.archive_file.specialized_lambda_zip[each.key].output_path
+  function_name = "${var.project_name}-${lower(each.key)}"
+  role          = aws_iam_role.lambda_role.arn # Reusing Bedrock role for simplicity, ideally separate roles
+  handler       = each.value.lambda.handler
+  runtime       = each.value.lambda.runtime
+  timeout       = 10
+  
+  source_code_hash = data.archive_file.specialized_lambda_zip[each.key].output_base64sha256
+  
+  tags = var.tags
+}
+
+# 3. Create Lex Intents for en_GB
+module "specialized_intents_en_gb" {
+  source            = "../resources/lex_intent"
+  for_each          = var.specialized_intents
+  
+  bot_id            = module.lex_bot.bot_id
+  bot_version       = "DRAFT"
+  locale_id         = "en_GB"
+  name              = each.key
+  description       = each.value.description
+  sample_utterances = each.value.utterances
+  
+  depends_on = [module.lex_bot]
+}
+
+# 4. Create Lex Intents for en_US
+module "specialized_intents_en_us" {
+  source            = "../resources/lex_intent"
+  for_each          = var.specialized_intents
+  
+  bot_id            = module.lex_bot.bot_id
+  bot_version       = "DRAFT"
+  locale_id         = "en_US"
+  name              = each.key
+  description       = each.value.description
+  sample_utterances = each.value.utterances
+  
+  depends_on = [aws_lexv2models_bot_locale.en_us]
+}
+
+# 5. Grant permission for Bedrock Lambda to invoke child Lambdas
+resource "aws_iam_policy" "invoke_child_lambdas" {
+  name        = "${var.project_name}-invoke-child-lambdas"
+  description = "Allow Bedrock MCP Lambda to invoke specialized intent Lambdas"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "lambda:InvokeFunction"
+        Resource = [for lambda in aws_lambda_function.specialized : lambda.arn]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "invoke_child_lambdas_attach" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = aws_iam_policy.invoke_child_lambdas.arn
 }
 
 # ---------------------------------------------------------------------------------------------------------------------

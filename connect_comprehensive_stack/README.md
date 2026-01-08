@@ -4,8 +4,9 @@ This Terraform stack deploys a complete Amazon Connect environment with a Bedroc
 
 ## Features
 - **Amazon Connect**: Core contact center instance with Contact Lens, Flow Logs, and comprehensive queue management.
-- **Bedrock-Primary Architecture**: Claude 3.5 Sonnet as the primary conversational AI engine with natural language understanding.
+- **Bedrock-Primary Hybrid Architecture**: Combines Claude 3.5 Sonnet for conversational AI with specialized deterministic Lambdas for high-speed, low-cost transaction processing.
 - **FastMCP 2.0 Tools**: Intelligent tool calling for account opening information, debit card details, and branch location services.
+- **Smart Routing**: Hybrid router automatically dispatches requests to either Generative AI (Bedrock) or Specialized Lambdas (Python) based on intent.
 - **Hallucination Detection**: Real-time validation agent that detects and prevents AI hallucinations with automated logging and metrics.
 - **Seamless Agent Handover**: Intelligent detection of handover needs with conversation context preservation and queue routing.
 - **Amazon Lex V2**: Simplified bot configuration that passes all input to Bedrock via Lambda for processing.

@@ -90,6 +90,20 @@ variable "bedrock_region" {
   default     = "us-east-1"
 }
 
+variable "specialized_intents" {
+  description = "Configuration for specialized deterministic intents (hybrid architecture)"
+  type = map(object({
+    description = string
+    utterances  = list(string)
+    lambda = object({
+      source_dir = string
+      handler    = string
+      runtime    = string
+    })
+  }))
+  default = {}
+}
+
 # Deprecated variables removed - no longer needed in Bedrock-primary architecture
 # - lex_fallback_lambda (replaced by bedrock_mcp_lambda)
 # - enable_voice_id (not used in new architecture)
