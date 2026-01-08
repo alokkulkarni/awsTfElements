@@ -8,6 +8,7 @@ This Terraform stack deploys a complete Amazon Connect environment with a Bedroc
 - **Data Lake & Analytics**: Serverless data pipeline (Kinesis -> Firehose -> S3 -> Athena) for deep analysis of:
     - Contact Trace Records (CTRs)
     - Agent Events
+    - **Lifecycle Events** (Real-time contact state changes for live backlog monitoring)
     - AI Insights (Hallucination logs, Latency metrics, Full query/response audit)
     - **Contact Lens Analytics** (Sentiment trends, Interruption analysis, Category matches)
     - **System Health** (CloudWatch Metrics streamed to S3 for long-term trending)

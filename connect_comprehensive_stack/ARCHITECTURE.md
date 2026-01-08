@@ -132,17 +132,51 @@ The solution includes a scalable Serverless Data Lake to analyze Contact Trace R
 7.  **Contact Lens Integration**: Direct Glue table mapping to Contact Lens JSON analysis files in S3.
 
 For example queries, see [ATHENA_QUERIES.md](ATHENA_QUERIES.md).
-    *   Customer Queue Flow manages wait with position updates and callback option
-9.  **Monitoring**: CloudWatch tracks:
-    *   Hallucination detection rates
-    *   Conversation metrics (duration, turns, tool usage)
-    *   Queue metrics (size, wait times, abandonment)
-    *   Error rates and Lambda performance
-10. **Audit Trail**: All interactions logged to:
-    *   CloudWatch Logs (structured logging)
-    *   S3 (chat transcripts, call recordings, contact trace records)
-    *   DynamoDB (hallucination logs, callback requests)
-    *   CloudTrail (API access auditing)
+
+### 3. Real-Time Lifecycle Events
+
+This solution uses EventBridge to capture granular contact state changes (e.g., `Queued`, `Connected`, `Disconnected`) in real-time, enabling "Live Backlog" monitoring that is faster than standard CTR generation.
+
+#### Lifecycle Events Sequence
+
+```ascii
+      +----------------+       +----------------+       +----------------+       +----------------+
+      | Amazon Connect |       |   EventBridge  |       | Kinesis        |       | Data Lake      |
+      | Instance       |       |   Rule         |       | Firehose       |       | (S3/Athena)    |
+      +-------+--------+       +-------+--------+       +-------+--------+       +-------+--------+
+              |                        |                        |                        |
+              | (Contact State Change) |                        |                        |
+              +----------------------->| (Match Rule)           |                        |
+              |                        +----------------------->|                        |
+              |                        |                        +----------------------->| (Buffer & Write)
+              |                        |                        |                        |
+              | (Queued)               |                        |                        |
+              +----------------------->|                        |                        |
+              |                        +----------------------->|                        |
+              |                        |                        +----------------------->| (Row: Status=Queued)
+              |                        |                        |                        |
+              | (ConnectedToAgent)     |                        |                        |
+              +----------------------->|                        |                        |
+              |                        +----------------------->|                        |
+              |                        |                        +----------------------->| (Row: Status=Connected)
+              |                        |                        |                        |
+              v                        v                        v                        v
+                                                                                (SQL: Queued - Connected)
+                                                                                = Current Backlog
+```
+
+## 4. Metrics Source Mapping
+
+The following table details which analytical metrics are derived from which source component in the Data Lake.
+
+| Metric Component | Source Pipeline | Primary Table | Key Metrics Derived | Latency |
+| :--- | :--- | :--- | :--- | :--- |
+| **Contact Trace Records (CTR)** | Kinesis Stream -> Firehose | `ctrs` | IVR Containment, AHT, Disconnect Reasons, Journey Outcome, Transfer Rate | Near Real-time (~2-3 min) |
+| **Agent Events** | Kinesis Stream -> Firehose | `agent_events` | Agent Availability, Login Duration, State Changes, Occupancy | Near Real-time |
+| **Lifecycle Events** | EventBridge -> Firehose | `lifecycle_events` | **Live Queue Backlog**, Point-in-time Contact States, Raw Event History | Real-time (<60s) |
+| **AI Insights** | Lambda -> Kinesis -> Firehose | `ai_insights` | Hallucination Rate, Validation Latency, Jailbreak Attempts, Model Performance | Real-time |
+| **Contact Lens** | S3 Export -> Glue Crawler | `contact_lens_analysis` | Sentiment Score, Interruption Rate, Non-Talk Time, Category Matches | Post-Call (5-10 min) |
+| **System Health** | CloudWatch Metric Stream | Defined by Namespace | Throttling, Concurrent Calls, System Errors, API Usage | Real-time |
 
 ---
 
