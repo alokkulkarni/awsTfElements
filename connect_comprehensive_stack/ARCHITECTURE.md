@@ -2,140 +2,215 @@
 
 This document provides a detailed architectural overview of the **Connect Comprehensive Stack**, a production-ready Amazon Connect solution featuring Bedrock-primary conversational AI, intelligent tool calling with FastMCP 2.0, real-time hallucination detection, seamless agent handover, and a scalable **Data Lake** for advanced analytics.
 
-## 1. High-Level Architecture (Federated & Hybrid)
+## 1. System Context Diagram (C4 Level 1)
+
+This high-level view shows how the **Connect Comprehensive System** interacts with users and external banking systems.
+
+```
+                                            +----------------------------------+
+                                            |   Core Banking Systems           |
+                                            |   (Accounts, Cards, Transactions)|
+                                            +----------------^+----------------+
+                                                             |
+                                                             | (Secure API / VPC Link)
+                                                             |
+    +--------------+              +--------------------------+-----------------------+
+    |              |              |                                                  |
+    |   Customer   +------------->+      Connect Comprehensive System            |
+    |  (Voice/Chat)|    HTTPS/    |      (Amazon Connect + Federated Bots)           |
+    |              |    SIP       |                                                  |
+    +--------------+              +--------------------------+-----------------------+
+                                                             |
+                                                             | (Analytics & Insights)
+                                                             v
+                                            +----------------------------------+
+                                            |        Data Lake & BI            |
+                                            |  (Athena / QuickSight / Tableau) |
+                                            +----------------------------------+
+```
+
+### Component Roles & Purpose (System Context)
+- **Customer**: The end-user interacting with the system via voice (PSTN) or chat (Web/Mobile).
+- **Core Banking Systems**: External APIs handling the actual financial transactions (Get Balance, Transfer Funds).
+- **Connect Comprehensive System**: The boundary of our deployed stack. It orchestrates the conversation, compliance, and routing.
+- **Data Lake & BI**: The destination for all operational data, providing a unified view of customer journeys and system health.
+
+## 2. Container Diagram (C4 Level 2)
+
+This diagram details the *containers* (deployable units) within the system boundary. It illustrates the **Federated Hybrid Architecture**.
+
+```
+    +-------------+         +----------------+
+    | Customer    +-------->+ Amazon Connect |
+    | Device      |         | Instance       |
+    +-------------+         +---+------+-----+
+                                |      |
+          (Voice / Chat Entry)  |      |  (Contact Flows & Routing)
+                                v      v
+                    +-----------+------+------------------------+
+                    |           Gateway Routing Layer           |
+                    | (Amazon Lex V2 - Gateway Bot)             |
+                    +-------------------+-----------------------+
+                                        |
+                  +---------------------+---------------------+
+                  |                                           |
+    +-------------v-----------+                 +-------------v-----------+
+    |   Conversational AI     |                 |   Transactional Logic   |
+    |   (Generative Path)     |                 |   (Specialized Path)    |
+    |                         |                 |                         |
+    | +---------------------+ |                 | +---------------------+ |
+    | | Bedrock MCP Lambda  | |                 | | Specialized Bot(s)  | |
+    | | (Orchestrator)      | |                 | | (Banking / Sales)   | |
+    | +----------+----------+ |                 | +----------+----------+ |
+    |            |            |                 |            |            |
+    | +----------v----------+ |                 | +----------v----------+ |
+    | | Claude 3.5 Sonnet   | |                 | | Specialized Lambda  | |
+    | | (Reasoning & Tools) | |                 | | (Python Logic)      | |
+    | +---------------------+ |                 | +----------+----------+ |
+    +-------------------------+                 +------------+------------+
+                                                             |
+                                                             v
+                                                +------------+------------+
+                                                |   External Banking API  |
+                                                +-------------------------+
+```
+
+### Component Roles & Purpose (Container Level)
+- **Amazon Connect Instance**: The central orchestrator. Handles telephony/chat connections, executes Contact Flows, and manages queues/agents.
+- **Gateway Routing Layer (Lex V2)**: The initial conversational interface. Captures user input and sends it to the Bedrock MCP Lambda for classification.
+- **Conversational AI (Bedrock MCP)**: Handles complex, non-deterministic queries using LLMs. It determines if a user should be routed to a specialized path or served directly.
+- **Transactional Logic (Specialized Bots/Lambdas)**: Handles strictly defined, high-compliance tasks like money transfers or checking balances. These components follow deterministic logic trees.
+- **External Banking API**: The source of truth for financial data, accessed securely via Lambda.
+
+## 3. High-Level Architecture (Federated & Hybrid)
 
 The solution leverages a **Federated Hybrid Pattern** combining the flexibility of Bedrock-based Generative AI with the control and speed of specialized, domain-specific Bots.
 
-*   **Gateway Bot (Router)**: The entry point (bedrock-primary) that uses Claude 3.5 Sonnet to understand intent and context.
-*   **Specialized Bots**: Dedicated Lex V2 bots (Banking, Sales) that handle deterministic, high-compliance workflows.
-*   **Connect Orchestrator**: The Contact Flow manages the routing between the Gateway and Specialized bots based on intent signals.
+### Federated Architecture Sequence (ASCII)
 
-### Federated Architecture Diagram
-
-```ascii
-                                       +-----------------------------------------------------------------------------------+
-                                       |                          AWS Cloud (Federated Architecture)                       |
-                                       |                                                                                   |
-      +--------+                       |     +------------------+         +----------------+          +----------------+   |
-      |        |   Voice / Chat        |     |                  |Check    |                |          |                |   |
-      |  User  +-------------------------->  +  Gateway Bot     +-------->+  Bedrock MCP   +--------->+ Claude 3.5     |   |
-      |        |                       |     |  (Router)        |Intent   |  Lambda        |          | Sonnet         |   |
-      +--------+                       |     +--------+---------+         +----------------+          +----------------+   |
-                                       |              |                                                                    |
-                                       |              | (Router Decision: "Transfer", "Banking", etc.)                     |
-                                       |              v                                                                    |
-                                       |     +--------+---------+                                                          |
-                                       |     |                  |                                                          |
-                                       |     |  Connect Flow    +---------------------------------------------------+      |
-                                       |     |  Orchestrator    |                                                   |      |
-                                       |     |                  |                                                   |      |
-                                       |     +---+--------+-----+                                                   |      |
-                                       |         |        |                                                         |      |
-                                       |         |        |                                                         |      |
-                                       |   +-----v--------v-----+                                         +---------v------+-----+
-                                       |   |                    |                                         |                      |
-                                       |   |   Banking Bot      +---------------------------------------->+    Sales Bot         |
-                                       |   |   (Specialized)    |                                         |    (Specialized)     |
-                                       |   |                    |                                         |                      |
-                                       |   +---------+----------+                                         +-----------+----------+
-                                       |             |                                                                |
-                                       |             v                                                                v
-                                       |   +---------+----------+                                         +-----------+----------+
-                                       |   |   Banking Lambda   |                                         |    Sales Lambda      |
-                                       |   |   (Deterministic)  |                                         |    (Deterministic)   |
-                                       |   +--------------------+                                         +----------------------+
-                                       |
-                                       +-----------------------------------------------------------------------------------+
+```
+      User          Connect        Gateway(Lex)    Bedrock(Lambda)   SalesBot(Lex)   SalesLambda
+        |              |                |                |                |               |
+        | "I want to   |                |                |                |               |
+        | open acct"   |                |                |                |               |
+        +------------->|                |                |                |               |
+        |              | Invoke Gateway |                |                |               |
+        |              +--------------->|                |                |               |
+        |              |                | Fallback Intent|                |               |
+        |              |                +--------------->|                |               |
+        |              |                |                |                |               |
+        |              |                | Analyze Intent |                |               |
+        |              |                | (Claude 3.5)   |                |               |
+        |              |                +--------------->|                |               |
+        |              |                |                |                |               |
+        |              |                | Response:      |                |               |
+        |              |   Fulfilled    | [OpenAccount]  |                |               |
+        |              |<---------------+<---------------+                |               |
+        |              |                |                |                |               |
+        | Check Intent |                |                |                |               |
+        | Condition    |                |                |                |               |
+        | (OpenAccount)|                |                |                |               |
+        |+------------>|                |                |                |               |
+        |              |                |                |                |               |
+        |              | Transfer to Sales Bot           |                |               |
+        |              +-------------------------------->|                |               |
+        |              |                |                | Invoke Logic   |               |
+        |              |                |                +--------------->|               |
+        |              |                |                |                | Logic:        |
+        |              |                |                |                | "Request Name"|
+        |              |                |                |   ElicitSlot   +-------------->|
+        |              |   "What is     |                |<---------------+               |
+        |              |   your name?"  |                |                |               |
+        |<-------------+                |                |                |               |
+        v              v                v                v                v               v
 ```
 
-### Data Flow Description
+## 4. Component Diagram (C4 Level 3)
 
-1.  **Ingestion**: User interacts via Voice or Chat. Amazon Connect handles the session.
-2.  **Gateway Analysis**: The **Gateway Bot** invokes Bedrock (Claude 3.5 Sonnet) to analyze the user's request.
-3.  **Routing Decision**:
-    *   **Conversational**: If the query is general, Bedrock answers directly.
-    *   **Specialized**: If the query matches a domain (e.g., "I want to open an account"), Bedrock signals the intent to Amazon Connect.
-4.  **Federated Handoff**: Connect transitions the contact to the appropriate **Specialized Bot** (e.g., Sales Bot).
-5.  **Execution**: The Specialized Bot uses its dedicated Lambda (e.g., `sales_lambda`) to execute the business logic deterministically.
+This diagram breaks down the "Generative Path" and "Transactional Path" to show individual Lambda functions, Databases, and Observability components.
 
-## 2. Observability & Data Lake Architecture
-
-A centralized Data Lake aggregates logs from all federated components, ensuring a unified view of the entire customer journey regardless of which bot handled the interaction.
-
-### Observability Diagram
-
-```ascii
-      +---------------------+      +----------------------+      +----------------------+      +----------------------+
-      |  Gateway Bot        |      |  Banking Bot         |      |  Sales Bot           |      |  Specialized Lambdas |
-      |  (Conversation Logs)|      |  (Conversation Logs) |      |  (Conversation Logs) |      |  (App Logs)          |
-      +----------+----------+      +-----------+----------+      +----------+-----------+      +-----------+----------+
-                 |                             |                            |                              |
-                 v                             v                            v                              v
-      +----------+-----------------------------+----------------------------+------------------------------+----------+
-      |                                              CloudWatch Log Groups                                            |
-      | (/aws/lex/gateway, /aws/lex/banking, /aws/lex/sales, /aws/lambda/banking, /aws/lambda/sales)                  |
-      +----------+----------------------------------------------------------------------------------------------------+
-                 |
-                 | (Subscription Filters)
-                 v
-      +----------+-----------+
-      |  Kinesis Firehose    |
-      |  (Central Aggregator)|
-      +----------+-----------+
-                 |
-                 | (Buffering & Batching)
-                 v
-      +----------+----------------------------------------------------------------+
-      |                                   S3 Data Lake                            |
-      |  s3://<bucket>/cloudwatch-logs/year=YYYY/month=MM/day=DD/                 |
-      +----------+----------------------------------------------------------------+
-                 |
-                 v
-      +----------+-----------+      +---------------------------+
-      |   AWS Glue Catalog   |----->|       Amazon Athena       |
-      |   (Table Definition) |      | (Unified SQL Interface)   |
-      +----------------------+      +---------------------------+
+```
+                                       +-------------------+
+                                       |  Connect Instance |
+                                       +---------+---------+
+                                                 |
+            +------------------------------------+-------------------------------------+
+            | flow: bedrock_primary_flow                                               |
+            v                                                                          v
+  +-----------------------+                                                  +-----------------------+
+  |    Gateway Bot        |                                                  |   Specialized Bots    |
+  |    (Lex V2)           |                                                  |   (Banking / Sales)   |
+  +---------+-------------+                                                  +----------+------------+
+            |                                                                           |
+            v                                                                           v
+  +-----------------------+                                                  +-----------------------+
+  |  Bedrock MCP Lambda   |                                                  |   Logic Lambdas       |
+  |  (Python 3.11)        |                                                  |   (Python 3.11)       |
+  +----+------+------+----+                                                  +----------+------------+
+       |      |      |                                                                  |
+       |      |      +----------> [ AWS Bedrock Runtime ]                               |
+       |      |                   (Claude 3.5 Sonnet)                                   |
+       |      |                                                                         |
+       |      +----------> [ Validation Agent ] (Hallucination Check)                   |
+       |                                                                                |
+       v                                                                                v
+  +-----------+           +--------------------------+                      +-----------------------+
+  | DynamoDB  |           |      DynamoDB Hallucns   |                      |      External APIs    |
+  | (History) |           |      (Detection Logs)    |                      |      (Mock Banking)   |
+  +-----------+           +--------------------------+                      +-----------------------+
 ```
 
-### Components
+### Component Roles & Purpose (Detailed Level 3)
 
-1.  **Unified Logging**: Every Bot and Lambda writes to its own CloudWatch Log Group.
-2.  **Subscription Filters**: Terraform automatically subscribes all new Log Groups to the central **Log Archive Firehose**.
-3.  **S3 Aggregation**: Firehose writes all logs to the same partition structure in S3, preserving the `cloudwatch-logs/` prefix.
-4.  **Athena Queries**: Existing Athena queries continue to work, allowing cross-component analysis (e.g., tracing a request from Gateway -> Bedrock -> Sales Bot -> Sales Lambda).
+#### Conversational Components
+*   **Gateway Bot (Lex V2)**: The primary entry point. Configured with a `FallbackIntent` that captures all input and delegates it to the `Bedrock MCP Lambda`. It acts as a "passthrough" to the LLM.
+*   **Bedrock MCP Lambda**: The brain of the generative path.
+    *   **Role**: Receives raw text, maintains conversation state (via DynamoDB), invokes Bedrock (Claude 3.5 Sonnet), executes MCP tools, and returns structured responses to Lex.
+    *   **Internal Module: Validation Agent**: A specialized Python class within the Lambda that checks LLM outputs against allowed topics to prevent hallucinations.
+*   **Specialized Bots (Lex V2)**: Separate Lex bots for specific domains (Banking, Sales).
+    *   **Role**: Isolated, deterministic NLU models. They handle sensitive flows like "Check Balance" where strict slot-filling is required.
+    *   **Logic Lambdas**: Dedicated Python functions for executing business logic (e.g., querying the mocked banking API) and returning specific prompts.
+*   **DynamoDB (History)**: Stores the conversation context (Session ID, User turns, AI turns) to allow the stateless Lambda to support multi-turn conversations.
+*   **DynamoDB (Hallucinations)**: Stores records of detected policy violations or hallucinations for audit purposes.
 
-## 3. Real-Time Lifecycle Events
+#### Data & Observability Components
 
-This solution uses EventBridge to capture granular contact state changes (e.g., `Queued`, `Connected`, `Disconnected`) in real-time, enabling "Live Backlog" monitoring that is faster than standard CTR generation.
-
-#### Lifecycle Events Sequence
-
-```ascii
-      +----------------+       +----------------+       +----------------+       +----------------+
-      | Amazon Connect |       |   EventBridge  |       | Kinesis        |       | Data Lake      |
-      | Instance       |       |   Rule         |       | Firehose       |       | (S3/Athena)    |
-      +-------+--------+       +-------+--------+       +-------+--------+       +-------+--------+
-              |                        |                        |                        |
-              | (Contact State Change) |                        |                        |
-              +----------------------->| (Match Rule)           |                        |
-              |                        +----------------------->|                        |
-              |                        |                        +----------------------->| (Buffer & Write)
-              |                        |                        |                        |
-              | (Queued)               |                        |                        |
-              +----------------------->|                        |                        |
-              |                        |                        +----------------------->| (Row: Status=Queued)
-              |                        |                        |                        |
-              | (ConnectedToAgent)     |                        |                        |
-              +----------------------->|                        |                        |
-              |                        +----------------------->|                        |
-              |                        |                        +----------------------->| (Row: Status=Connected)
-              |                        |                        |                        |
-              v                        v                        v                        v
-                                                                                (SQL: Queued - Connected)
-                                                                                = Current Backlog
+```
+   Logs Sources                             Aggregation Layer               Storage & Analysis
+   +--------------+                         +------------------+            +-------------------+
+   | CloudWatch   +--[Sub Filter]---------->| Kinesis Firehose |----------->| S3 Data Lake      |
+   | Logs         |                         | (Buffering)      |            | (Parquet/JSON)    |
+   +--------------+                         +------------------+            +---------+---------+
+                                                                                      |
+   +--------------+                         +------------------+                      v
+   | Connect      +--[Kinesis Stream]------>| Kinesis Firehose |            +-------------------+
+   | CTRs         |                         | (Buffering)      |            | AWS Glue Crawler  |
+   +--------------+                         +------------------+            | (Schema Discovery)|
+                                                                            +---------+---------+
+   +--------------+                                                                   |
+   | Contact      +--[S3 Export]----------------------------------------------------->|
+   | Lens         |                                                                   v
+   +--------------+                                                         +-------------------+
+                                                                            | Amazon Athena     |
+                                                                            | (SQL Query Engine)|
+                                                                            +-------------------+
 ```
 
-## 4. Metrics Source Mapping
+*   **CloudWatch Logs**: Captures execution logs from all Lambdas and conversation logs from Lex bots.
+*   **Kinesis Streams**: Real-time pipe for raw Connect data (Contact Trace Records, Agent Events).
+*   **Kinesis Firehose**: A fully managed ETL service that buffers incoming streaming data, optionally compresses/transforms it, and writes it to S3 in batches (reducing S3 PUT costs and file fragmentation).
+*   **S3 Data Lake**: The unified storage layer. Organized by prefixes (`/ctrs`, `/logs`, `/agent-events`).
+*   **AWS Glue Crawler**: Automatically scans S3 buckets to infer schema (tables, columns, data types) and populates the Glue Data Catalog.
+*   **Amazon Athena**: Serverless interactive query service. Allows analysts to run standard SQL queries against the raw data in S3 for reporting and dashboards.
+
+## 5. Deployment & Security
+
+### Security Components
+*   **KMS Keys**: Provide encryption-at-rest for S3 buckets, Kinesis Streams, and DynamoDB tables. Supports "Zero Trust" architecture.
+*   **IAM Roles**: Granular Least Privilege policies ensuring Lambdas can only access their specific DynamoDB tables and Bedrock models.
+*   **VPC Endpoints (Optional)**: Can be enabled to ensure traffic between Lambda and Bedrock/DynamoDB never traverses the public internet.
+
+## 6. Metrics Source Mapping
 
 The following table details which analytical metrics are derived from which source component in the Data Lake.
 
@@ -149,31 +224,131 @@ The following table details which analytical metrics are derived from which sour
 | **Contact Lens** | S3 Export -> Glue Crawler | `contact_lens_analysis` | Sentiment Score, Interruption Rate, Non-Talk Time, Category Matches | Post-Call (5-10 min) |
 | **System Health** | CloudWatch Metric Stream | Defined by Namespace | Throttling, Concurrent Calls, System Errors, API Usage | Real-time |
 
----
+## 7. Hallucination Detection & Remediation Flow
 
-## 5. Component Deep Dive
+The system employs a multi-stage validation strategy managed by the `ValidationAgent` class within the Bedrock MCP Lambda. This ensures that AI responses are factually grounded and policy-compliant before reaching the user.
 
-### 5.1 Amazon Connect (The Orchestrator)
-*   **Role**: Entry point and central router for all voice and chat interactions.
-*   **Key Features**:
-    *   **Gateway Contact Flow**: Routes to Gateway Bot initially.
-    *   **Federated Routing**: Checks Gateway output signal to switch Flow execution to **Banking Bot** or **Sales Bot**.
-    *   **Customer Queue Flow**: Manages wait experience with position updates and callback options
-    *   **Contact Lens**: Real-time sentiment analysis and transcription
-    *   **Queues**: GeneralAgentQueue for agent handover
-    *   **Storage**: S3 storage for chat transcripts, call recordings, and contact trace records
+### Validation Sequence Diagram
 
-### 5.2 Amazon Lex V2 (Federated Mesh)
-*   **Gateway Bot**:
-    *   **Role**: Smart Router. Uses Bedrock/LLM to categorize intent.
-    *   **Fulfillment**: Bedrock MCP Lambda.
-*   **Banking Bot**:
-    *   **Role**: Specialized execution for "Check Balance", "Transfer".
-    *   **Fulfillment**: Banking Lambda (Python).
-*   **Sales Bot**:
-    *   **Role**: Specialized execution for "Open Account".
-    *   **Fulfillment**: Sales Lambda (Python).
+```
+      +--------+        +------------------+       +-------------------+       +-----------------------+
+      | User   |        | Bedrock Lambda   |       |  Validation Agent |       |  Validation Rules     |
+      +---+----+        +--------+---------+       +---------+---------+       +-----------+-----------+
+          |                      |                           |                             |
+          | "How much is the     |                           |                             |
+          | fee for premium?"    |                           |                             |
+          +--------------------->|                           |                             |
+                                 |                           |                             |
+                                 | 1. Invoke Model           |                             |
+                                 +-------------------------->|                             |
+                                 |  (History + Tools + Query)|                             |
+                                 |                           |                             |
+                                 |<--------------------------+                             |
+                                 |  Response: "Fee is £10"   |                             |
+                                 |                           | 2. Verify(Response, Tools)  |
+                                 |                           +---------------------------->|
+                                 |                           |                             |
+                                 |                           | Check 1: Fabricated Data?   |
+                                 |                           | (Is "£10" in Tool Output?)  |
+                                 |                           |                             |
+                                 |                           | Check 2: Domain Boundary?   |
+                                 |                           | (Is topic "Mortgage"?)      |
+                                 |                           |                             |
+                                 |                           | Check 3: Security Sanity    |
+                                 |                           | (Any "System Prompt" leak?) |
+                                 |                           |<----------------------------+
+                                 |                           | Result: {Passed: False,     |
+                                 |                           |  Issue: "Fee not found"}    |
+                                 |<--------------------------+                             |
+                                 |                           |                             |
+                                 | 3. Remediation Strategy   |                             |
+             <-------------------+ (If Critical => Fallback) |                             |
+           "I apologize, I       | (If Low => Modify/Log)    | 4. Log to Data Lake         |
+           cannot verify that    +-------------------------------------------------------->| (Kinesis Stream:
+           fee currently."       |                           |                             |  ai_insights)
+                                 |                           |                             |
+          v                      v                           v                             v
+```
 
-### 5.3 Logging & Data Lake
-*   **Unified Prefix**: All components write to `cloudwatch-logs/`.
-*   **No Code Changes Required for Analytics**: Queries written for the monolithic bot work for the federated bots because the log structure (JSON) and storage path remain consistent.
+### Validation Checks
+1.  **Fabricated Data Check**: Scans the model response for specific claims (fees, document names) and verifies they exist in the raw Tool Output. If the model mentions "£50 fee" but the tool said "£20", it is flagged.
+2.  **Domain Boundary Check**: Uses an allow-list of topics. If the model starts discussing "Cryptocurrency" or "Mortgages" (out of scope), it is blocked.
+3.  **Security & Isolation Check**: Regex-based scanning for PII (Social Security patterns, Sort Codes) or Internal System Prompts ("My instructions are...").
+
+## 8. Operational Data Model (DynamoDB)
+
+The system uses Amazon DynamoDB for low-latency state management and operational queuing.
+
+### 8.1 Conversation Awareness (`conversation_history`)
+Stores the multi-turn context for the stateless Lambda functions.
+*   **Partition Key**: `session_id` (String) - The Connect Contact ID.
+*   **Sort Key**: `timestamp` (String) - ISO 8601 timestamp.
+*   **TTL**: 24 hours (items expire automatically).
+*   **Attributes**:
+    *   `role`: "user" | "assistant"
+    *   `content`: The text content of the turn.
+    *   `tool_use`: (Optional) JSON tracking tool calls made in this turn.
+
+### 8.2 Operational Callbacks (`callback_queue`)
+Manages the state of requested callbacks when agents are unavailable.
+*   **Partition Key**: `contact_id` (String).
+*   **Attributes**:
+    *   `phone_number`: Customer's number.
+    *   `queue_arn`: Target queue.
+    *   `status`: "PENDING" | "CLAIMED" | "COMPLETED".
+    *   `retry_count`: Number of callback attempts.
+
+## 9. Comprehensive Data Lake Pipeline
+
+All system components stream data into a centralized S3 Data Lake, partitioned for performance and queryability via Amazon Athena.
+
+### Data Ingestion Architecture
+
+```
+    [SOURCES]                     [INGESTION]                   [STORAGE]               [CATALOG]
+    =========                     ===========                   =========               =========
+
+ 1. TELEPHONY DATA
+    +----------------+   Stream   +------------------+         +----------------+
+    | Connect CTRs   +----------->| Firehose (Batch) +-------->| S3: /ctr/      |
+    +----------------+            +------------------+         | (Parquet)      |
+                                                               +----------------+
+ 2. AGENT METRICS                                                      ^
+    +----------------+   Stream   +------------------+                 |            +-------------+
+    | Agent Events   +----------->| Firehose (Batch) +-----------------+            | AWS Glue    |
+    +----------------+            +------------------+                 |            | Crawler     |
+                                                                       |            +------+------+
+ 3. REAL-TIME OPS                                                      |                   |
+    +----------------+   Event    +------------------+                 |                   | (Sync)
+    | Lifecycle Evts +----------->| Firehose (Buffr) +-----------------+                   |
+    | (EventBridge)  |            +------------------+                 |                   v
+    +----------------+                                                 |            +-------------+
+                                                                       |            | Amazon      |
+ 4. AI & QUALITY                                                       |            | Athena      |
+    +----------------+   Stream   +------------------+                 |            | (SQL)       |
+    | Validation Agt +----------->| Firehose (Batch) +-----------------+            +-------------+
+    | (Kinesis)      |            +------------------+                 |
+    +----------------+                                                 |
+                                                                       |
+ 5. SERVER LOGS                                                        |
+    +----------------+   SubFilt  +------------------+                 |
+    | CloudWatch Logs+----------->| Firehose (Zip)   +-----------------+
+    | (All Lambdas)  |            +------------------+                 |
+    +----------------+                                                 |
+                                                                       |
+ 6. CONVERSATION INTEL                                                 |
+    +----------------+   Export   +------------------+                 |
+    | Contact Lens   +----------->| S3 Direct Put    +-----------------+
+    | (Transcripts)  |            +------------------+
+    +----------------+
+```
+
+### Data Lake Schema & Purpose
+
+| Dataset | Partitioning | Source | Purpose |
+| :--- | :--- | :--- | :--- |
+| **`ctrs`** | `/year/month/day` | Connect Kinesis Stream | **Business Intelligence**: The "Golden Record" of a call. Used for calculating Average Handle Time (AHT), Transfer Rates, and IVR Containment. |
+| **`agent_events`** | `/year/month/day` | Connect Kinesis Stream | **Workforce Mgmt**: detailed audit trails of agent login/logout, status changes (Available -> Offline), and missed calls. |
+| **`lifecycle_events`** | `/year/month/day/hour` | EventBridge Rule | **Real-Time Ops**: Granular state changes (Queued, Connected, OnHold) used to calculate *Live Queue Backlog* and *Abandonment Velocity* with <30s latency. |
+| **`ai_insights`** | `/year/month/day` | Validation Agent (Lambda) | **AI Governance**: Every LLM interaction is scored. Logs Hallucination detected (True/False), Response Latency, and the specific prompt/response pairs for fine-tuning. |
+| **`contact_lens`** | `/year/month/day` | S3 Export | **Quality Assurance**: Deep analysis of call transcripts including Sentiment trends, Interruption rates, and Non-talk time. |
