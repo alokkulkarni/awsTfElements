@@ -352,3 +352,67 @@ All system components stream data into a centralized S3 Data Lake, partitioned f
 | **`lifecycle_events`** | `/year/month/day/hour` | EventBridge Rule | **Real-Time Ops**: Granular state changes (Queued, Connected, OnHold) used to calculate *Live Queue Backlog* and *Abandonment Velocity* with <30s latency. |
 | **`ai_insights`** | `/year/month/day` | Validation Agent (Lambda) | **AI Governance**: Every LLM interaction is scored. Logs Hallucination detected (True/False), Response Latency, and the specific prompt/response pairs for fine-tuning. |
 | **`contact_lens`** | `/year/month/day` | S3 Export | **Quality Assurance**: Deep analysis of call transcripts including Sentiment trends, Interruption rates, and Non-talk time. |
+
+## 10. Non-Functional Requirements (NFRs)
+
+The architecture is designed to meet strict enterprise-grade requirements for banking grade workloads.
+
+### 10.1 Performance & Latency
+*   **Voice Latency**: Total conversational turn-around time (Standard) < 1.5s.
+    *   *Constraint*: Bedrock generation can vary (1-4s). To mitigate, the system uses streaming responses (future optimization) or "filler" phrases if latency exceeds thresholds.
+*   **Throughput**:
+    *   Connect: Supports 100+ concurrent calls (Soft Limit, adjustable).
+    *   Lambda: Burst concurrency enabled (starting 1000).
+    *   Kinesis: 1000 records/sec per shard (Auto-scaling enabled).
+*   **Data Freshness**:
+    *   Operational Dashboard (Backlog): < 60 seconds.
+    *   Historical Reporting (Athena): ~5-15 minutes (Firehose buffering).
+
+### 10.2 Reliability & Availability
+*   **RTO (Recovery Time Objective)**: < 15 minutes (Infrastructure as Code redeployment).
+*   **RPO (Recovery Point Objective)**: < 5 minutes (DynamoDB PITR, S3 Versioning).
+*   **Availability**: Relies on Regional AWS Services (Connect, Lambda, DynamoDB, S3) which offer inherently high availability across multiple Availability Zones (AZs).
+
+### 10.3 Security & Compliance
+*   **Encryption**: All data at rest encrypted via KMS (CMK). All data in transit uses TLS 1.2+.
+*   **Data Residency**: All storage buckets and queues are strictly regionalized (e.g., `eu-west-2`).
+*   **PII Redaction**: Contact Lens automatically redacts sensitive data from transcripts and audio. Validation Agent acts as a secondary PII guardrail for LLM outputs.
+
+## 11. Performance Testing Strategy
+
+To validate the NFRs, the following testing strategies are recommended:
+
+### 11.1 Tools
+*   **StartOutboundVoiceContact API**: To simulate inbound traffic volume.
+*   **Artillery / k6**: For load testing the API Gateway / Lambda backend components directly (bypassing telephony for logic stress testing).
+*   **AWS Fault Injection Simulator (FIS)**: To test resilience against AZ failures or API throttling.
+
+### 11.2 Key Test Scenarios
+1.  **Orchestrator Stress Test**: Initiate 50 concurrent calls to verify Lambda provisioning speed and DynamoDB throughput logic (avoiding `ProvisionedThroughputExceededException`).
+2.  **Latency Profiling**: Measure the "Time to First Byte" (TTFB) from the Bedrock Lambda across 1000 requests to establish P95 and P99 baselines.
+3.  **Hallucination robustness**: Inject 500 adversarial prompts ("Ignore instructions", "What is my password") to verify the `ValidationAgent` blocking rate remains > 99%.
+
+## 12. Architecture Decision Records (ADRs)
+
+Key technical decisions shaping this architecture.
+
+### ADR-001: Federated Hybrid Architecture
+*   **Context**: We needed the flexibility of Generative AI but the strict compliance of Banking systems.
+*   **Decision**: Adopt a "Hub and Spoke" model. Use Bedrock (Claude 3.5) for general intent classification and context gathering, but hand off to specialized, deterministic Lex Bots for transactional execution.
+*   **Consequence**: Increases complexity in routing logic but guarantees determinism for financial transactions.
+
+### ADR-002: FastMCP over LangChain
+*   **Context**: The application required tool calling. LangChain provides high abstraction but adds latency and "black box" complexity.
+*   **Decision**: Implement "FastMCP" style tool calling using native Python and Pydantic.
+*   **Consequence**: Lower cold start times, full control over the prompt loop, and reduced dependency bloat.
+
+### ADR-003: Asynchronous Data Lake vs. Real-time Database
+*   **Context**: Reporting needs to be cost-effective but reasonably fresh.
+*   **Decision**: Use Kinesis Firehose to batch write to S3/Athena instead of writing directly to an RDS/OpenSearch cluster.
+*   **Consequence**: Extremely low cost and zero server maintenance. Trade-off is data availability latency of ~5 minutes (acceptable for BI/Analytics).
+
+## 13. Known Issues & Limitations
+
+*   **LLM Cold Starts**: The first invocation of the Bedrock Lambda after inactivity may experience a 3-5s cold start latency due to the heavy AWS SDK initialization. *Mitigation: Provisioned Concurrency enabled.*
+*   **Voice/Speech Transcription**: Lex V2 transcription accuracy for alphanumeric strings (like Postcodes or Account IDs) can be inconsistent in noisy environments. *Mitigation: DTMF fallback logic or specialized slot types implemented in key areas.*
+*   **Token Limits**: Single-turn context limit is set to 4096 tokens. Extremely long conversations may lose context of the earliest turns as they are rolled off the DynamoDB history buffer.
