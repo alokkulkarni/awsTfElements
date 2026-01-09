@@ -574,3 +574,74 @@ Data flows through the system using a combination of **Amazon Connect Contact At
 *   **System Context**: Passed implicitly by Connect (ANI, DNIS, Queue Name).
 *   **Conversation Context**: Stored in DynamoDB (`conversation_history` table), keyed by Contact ID. Allows the Bedrock Lambda to "remember" previous turns.
 *   **Handover Context**: Explicit attributes set in the Contact Flow before transferring to a queue (`conversation_summary`, `handover_reason`). These are displayed to the agent immediately upon call acceptance.
+
+## 15. User Management & Routing Logic
+
+This section details how human agents are organized, routed, and secured within the system.
+
+### 15.1 Routing Profiles
+Routing Profiles determine which queues an agent acts upon and their priority. They also define the "Outbound Queue" (the implementation of Caller ID for outbound calls).
+
+| Profile Name | Description | Voice | Chat | Task | Queues (Priority) | Default Outbound Queue |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Basic** | Entry-level generic agent | 1 | 2 | 1 | BasicQueue (P1), GeneralAgentQueue (P2) | GeneralAgentQueue |
+| **Main** | Senior agent with outbound focus | 1 | 2 | 10 | GeneralAgentQueue (P1) | GeneralAgentQueue |
+| **Account** | Specialized Account Services | 1 | 2 | 10 | AccountQueue (P1) | AccountQueue |
+| **Lending** | Specialized Lending Services | 1 | 2 | 10 | LendingQueue (P1) | LendingQueue |
+| **Onboarding** | Specialized Onboarding Services | 1 | 2 | 10 | OnboardingQueue (P1) | OnboardingQueue |
+
+### 15.2 Security Profiles
+Security profiles control access to the Amazon Connect Dashboard and CCP.
+
+*   **AgentRef**: Minimal access. Can access CCP (Contact Control Panel) to accept/reject calls and chat. Cannot edit flows or view reports.
+*   **CallCenterManager**: Moderate access. Can manage Users, Queues, and Routing Profiles. Can view Real-time and Historical Metrics reports.
+*   **Admin**: Full Root access to the instance.
+
+### 15.3 Agent Alignment Matrix
+The infrastructure provisions the following default user references.
+
+| Username | Role (Security Profile) | Routing Logic (Routing Profile) | Skills / Capability |
+| :--- | :--- | :--- | :--- |
+| **Agent One** | `Admin` | `Basic` | System Administrator who also takes basic calls (Overflow). |
+| **Agent Two** | `CallCenterManager` | `Main` | Team Lead. Manages floor, takes escalations (General Queue). |
+| **Agent Three** | `Agent` | `Account` | Specialist. Handles checking, savings, statement queries. |
+| **Agent Four** | `Agent` | `Lending` | Specialist. Handles loans, mortgages, rate queries. |
+| **Agent Five** | `Agent` | `Onboarding` | Specialist. Handles KYC and new customer signup. |
+
+### 15.4 Queue Quick Connects
+The architecture implements "Queue Quick Connects" to facilitate transfers.
+*   **Mechanism**: A Quick Connect is created for every defined Queue.
+*   **Usage**: When an agent clicks "Transfer" in the CCP, they see a list of these Quick Connects (e.g., "Transfer to Lending").
+*   **Routing**: Selecting a Quick Connect routes the customer to the specific `customer_queue_flow` associated with that queue, ensuring logic (music on hold, position announcement) is maintained during transfer.
+
+## 16. Telephony, Transcripts & Analytics
+
+### 16.1 External Numbers & Outbound Dialing
+*   **Inbound**: Separate Toll-Free or DID numbers are claimed and assigned to entry flows (Voice Entry).
+*   **Outbound**:
+    *   Agents are assigned a specific **Outbound Queue** via their Routing Profile.
+    *   When an agent dials a number manually in the CCP, the system uses the **Caller ID** associated with that Outbound Queue.
+    *   **Architecture**: `aws_connect_phone_number.outbound` resource is associated as the Outbound Caller ID for the `GeneralAgentQueue`.
+
+### 16.2 Transcript Generation & Storage
+1.  **Generation**:
+    *   **Chat**: Transcripts are native to Connect. Every message is auto-journaled.
+    *   **Voice**: Enabled via **Contact Lens** or standard recording. The `bedrock_primary` flow triggers "Start Recording" block.
+2.  **Storage**:
+    *   Records are piped to an S3 bucket defined in `aws_connect_instance_storage_config`.
+    *   **Paths**:
+        *   Chat: `s3://<bucket>/chat-transcripts/<date>/`
+        *   Voice: `s3://<bucket>/call-recordings/<date>/`
+3.  **Analytics**:
+    *   **Contact Lens**: If enabled, performs NLP on voice audio to generate transcripts and sentiment analysis.
+    *   **Kinesis Streams**: Real-time data (Agent Events, Contact Trace Records) is streamed to Kinesis for custom downstream analytics (e.g., Quicksight dashboards).
+
+### 16.3 Visualization & Handover
+How data reaches the agent:
+*   **During Interaction**:
+    *   **Screen Pop**: The `TransferToAgent` logic sets attributes (`handover_reason`, `sentiment`). These appear as key-value pairs in the Agent's CCP "Details" tab.
+    *   **Chat History**: If the channel is Chat, the agent automatically sees the full conversation history (from Bedrock/Lex) in the standardized chat UI windows.
+*   **Post-Interaction**:
+    *   Supervisors can view the full "Contact Trace Record (CTR)" in the Connect Dashboard.
+    *   This CTR includes the **recording**, **transcript** (if Contact Lens used), and the **graphical timeline** of sentiment (Positive/Negative/Neutral) throughout the call.
+
