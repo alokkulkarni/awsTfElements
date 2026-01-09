@@ -1,4 +1,5 @@
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 # ---------------------------------------------------------------------------------------------------------------------
 # KMS Key for Encryption (Zero Trust)
@@ -707,10 +708,6 @@ module "bedrock_mcp_lambda" {
     QUEUE_ARN_ACCOUNT    = aws_connect_queue.queues["AccountQueue"].arn
     QUEUE_ARN_LENDING    = aws_connect_queue.queues["LendingQueue"].arn
     QUEUE_ARN_ONBOARDING = aws_connect_queue.queues["OnboardingQueue"].arn
-  }, {
-    # Specialized Lambda ARNs (Dynamic)
-    for k, v in aws_lambda_function.specialized : 
-    "LAMBDA_${upper(k)}" => v.arn
   })
 
   tags = var.tags
@@ -789,83 +786,8 @@ resource "aws_lambda_provisioned_concurrency_config" "bedrock_mcp_pc" {
 }
 
 # =====================================================================================================================
-# Specialized Lambdas & Intents (Hybrid Architecture)
+# Specialized Lambdas & Intents (MIGRATED TO FEDERATED ARCHITECTURE)
 # =====================================================================================================================
-
-# 1. Archive new Lambda source code
-data "archive_file" "specialized_lambda_zip" {
-  for_each    = var.specialized_intents
-  type        = "zip"
-  source_dir  = each.value.lambda.source_dir
-  output_path = "${path.module}/.terraform/archive/${each.key}.zip"
-}
-
-# 2. Create specialized Lambda functions
-resource "aws_lambda_function" "specialized" {
-  for_each      = var.specialized_intents
-  filename      = data.archive_file.specialized_lambda_zip[each.key].output_path
-  function_name = "${var.project_name}-${lower(each.key)}"
-  role          = aws_iam_role.lambda_role.arn # Reusing Bedrock role for simplicity, ideally separate roles
-  handler       = each.value.lambda.handler
-  runtime       = each.value.lambda.runtime
-  timeout       = 10
-  
-  source_code_hash = data.archive_file.specialized_lambda_zip[each.key].output_base64sha256
-  
-  tags = var.tags
-}
-
-# 3. Create Lex Intents for en_GB
-module "specialized_intents_en_gb" {
-  source            = "../resources/lex_intent"
-  for_each          = var.specialized_intents
-  
-  bot_id            = module.lex_bot.bot_id
-  bot_version       = "DRAFT"
-  locale_id         = "en_GB"
-  name              = each.key
-  description       = each.value.description
-  sample_utterances = each.value.utterances
-  
-  depends_on = [module.lex_bot]
-}
-
-# 4. Create Lex Intents for en_US
-module "specialized_intents_en_us" {
-  source            = "../resources/lex_intent"
-  for_each          = var.specialized_intents
-  
-  bot_id            = module.lex_bot.bot_id
-  bot_version       = "DRAFT"
-  locale_id         = "en_US"
-  name              = each.key
-  description       = each.value.description
-  sample_utterances = each.value.utterances
-  
-  depends_on = [aws_lexv2models_bot_locale.en_us]
-}
-
-# 5. Grant permission for Bedrock Lambda to invoke child Lambdas
-resource "aws_iam_policy" "invoke_child_lambdas" {
-  name        = "${var.project_name}-invoke-child-lambdas"
-  description = "Allow Bedrock MCP Lambda to invoke specialized intent Lambdas"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = "lambda:InvokeFunction"
-        Resource = [for lambda in aws_lambda_function.specialized : lambda.arn]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "invoke_child_lambdas_attach" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = aws_iam_policy.invoke_child_lambdas.arn
-}
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Amazon Lex Bot Configuration
@@ -903,14 +825,217 @@ resource "aws_iam_role_policy_attachment" "invoke_child_lambdas_attach" {
 #     * Otherwise → continue conversation with bot
 # =====================================================================================================================
 
-# Using the module for the bot shell
+# =====================================================================================================================
+# LEX BOT RESOURCES (Federated Architecture)
+# =====================================================================================================================
+
+# 1. Main Gateway Bot (Router / Bedrock Fallback)
 module "lex_bot" {
   source                 = "../resources/lex"
   bot_name               = "${var.project_name}-bot"
   fulfillment_lambda_arn = aws_lambda_alias.bedrock_mcp_live.arn
   locale                 = var.locale
   voice_id               = var.voice_id
+  enable_chat_intent     = true
   tags                   = var.tags
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# LOGGING FOR FEDERATED BOTS
+# ---------------------------------------------------------------------------------------------------------------------
+resource "aws_cloudwatch_log_group" "banking_lex_logs" {
+  name              = "/aws/lex/${var.project_name}-banking-bot"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "sales_lex_logs" {
+  name              = "/aws/lex/${var.project_name}-sales-bot"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+# 2. Banking Bot (Specialized)
+module "lex_bot_banking" {
+  source                 = "../resources/lex"
+  bot_name               = "${var.project_name}-banking-bot"
+  fulfillment_lambda_arn = aws_lambda_alias.banking_live.arn
+  locale                 = var.locale
+  voice_id               = var.voice_id
+  enable_chat_intent     = false # Connects to Banking Intents instead
+  conversation_log_group_arn = aws_cloudwatch_log_group.banking_lex_logs.arn
+  tags                   = var.tags
+}
+
+# Dynamic Banking Intents from tfvars
+resource "aws_lexv2models_intent" "banking_intents_from_vars" {
+  for_each    = var.specialized_intents
+  
+  bot_id      = module.lex_bot_banking.bot_id
+  bot_version = "DRAFT"
+  locale_id   = var.locale
+  name        = each.key
+  description = each.value.description
+  
+  # Map list of strings to block format
+  dynamic "sample_utterance" {
+    for_each = each.value.utterances
+    content {
+      utterance = sample_utterance.value
+    }
+  }
+
+  fulfillment_code_hook { enabled = true }
+}
+
+resource "aws_lexv2models_intent" "banking_transfer" {
+  bot_id      = module.lex_bot_banking.bot_id
+  bot_version = "DRAFT"
+  locale_id   = var.locale
+  name        = "TransferMoney"
+  
+  sample_utterance { utterance = "Transfer money" }
+  sample_utterance { utterance = "Send funds" }
+
+  fulfillment_code_hook { enabled = true }
+}
+
+# 3. Sales Bot (Specialized)
+module "lex_bot_sales" {
+  source                 = "../resources/lex"
+  bot_name               = "${var.project_name}-sales-bot"
+  fulfillment_lambda_arn = aws_lambda_alias.sales_live.arn
+  locale                 = var.locale
+  voice_id               = var.voice_id
+  enable_chat_intent     = false
+  conversation_log_group_arn = aws_cloudwatch_log_group.sales_lex_logs.arn
+  tags                   = var.tags
+}
+
+resource "aws_lexv2models_intent" "sales_product" {
+  bot_id      = module.lex_bot_sales.bot_id
+  bot_version = "DRAFT"
+  locale_id   = var.locale
+  name        = "ProductInfo"
+  
+  sample_utterance { utterance = "What products do you have" }
+  sample_utterance { utterance = "Tell me about credit cards" }
+
+  fulfillment_code_hook { enabled = true }
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# LAMBDA FUNCTIONS (Specialized)
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Archive for Banking Lambda
+data "archive_file" "banking_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/banking"
+  output_path = "${path.module}/lambda/banking_deployment.zip"
+}
+
+# IAM Role for Banking Lambda
+resource "aws_iam_role" "banking_lambda_role" {
+  name = "${var.project_name}-banking-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = { Service = "lambda.amazonaws.com" }
+      }
+    ]
+  })
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "banking_lambda_basic" {
+  role       = aws_iam_role.banking_lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+module "banking_lambda" {
+  source        = "../resources/lambda"
+  filename      = data.archive_file.banking_zip.output_path
+  function_name = "${var.project_name}-banking"
+  role_arn      = aws_iam_role.banking_lambda_role.arn
+  handler       = "index.lambda_handler"
+  runtime       = "python3.11"
+  environment_variables = {
+    LOG_LEVEL = "INFO"
+  }
+  tags          = var.tags
+}
+
+resource "aws_lambda_alias" "banking_live" {
+  name             = "live"
+  description      = "Live alias for Banking Logic"
+  function_name    = module.banking_lambda.function_name
+  function_version = module.banking_lambda.version
+}
+
+resource "aws_cloudwatch_log_group" "banking_lambda_logs" {
+  name              = "/aws/lambda/${module.banking_lambda.function_name}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+# Archive for Sales Lambda
+data "archive_file" "sales_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/sales"
+  output_path = "${path.module}/lambda/sales_deployment.zip"
+}
+
+# IAM Role for Sales Lambda
+resource "aws_iam_role" "sales_lambda_role" {
+  name = "${var.project_name}-sales-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = { Service = "lambda.amazonaws.com" }
+      }
+    ]
+  })
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "sales_lambda_basic" {
+  role       = aws_iam_role.sales_lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+module "sales_lambda" {
+  source        = "../resources/lambda"
+  filename      = data.archive_file.sales_zip.output_path
+  function_name = "${var.project_name}-sales"
+  role_arn      = aws_iam_role.sales_lambda_role.arn
+  handler       = "index.lambda_handler"
+  runtime       = "python3.11"
+  environment_variables = {
+    LOG_LEVEL = "INFO"
+  }
+  tags          = var.tags
+}
+
+resource "aws_lambda_alias" "sales_live" {
+  name             = "live"
+  description      = "Live alias for Sales Logic"
+  function_name    = module.sales_lambda.function_name
+  function_version = module.sales_lambda.version
+}
+
+resource "aws_cloudwatch_log_group" "sales_lambda_logs" {
+  name              = "/aws/lambda/${module.sales_lambda.function_name}"
+  retention_in_days = 30
+  tags              = var.tags
 }
 
 # We need to define the Bot Locale, Intents, and Slots explicitly as the module is minimal
@@ -1297,7 +1422,11 @@ resource "aws_cloudwatch_log_resource_policy" "lex_logs" {
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "${aws_cloudwatch_log_group.lex_logs.arn}:*"
+        Resource = [
+          "${aws_cloudwatch_log_group.lex_logs.arn}:*",
+          "${aws_cloudwatch_log_group.banking_lex_logs.arn}:*",
+          "${aws_cloudwatch_log_group.sales_lex_logs.arn}:*"
+        ]
       }
     ]
   })
@@ -1897,14 +2026,18 @@ resource "aws_connect_contact_flow" "bedrock_primary" {
   description = "Bedrock-primary architecture with multi-turn conversation and intelligent agent transfer - PRIMARY FLOW FOR PHONE NUMBERS"
   type        = "CONTACT_FLOW"
   content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
-    lex_bot_alias_arn = awscc_lex_bot_alias.this.arn
-    queue_arn         = aws_connect_queue.queues["GeneralAgentQueue"].arn
-    beep_prompt_arn   = data.aws_connect_prompt.beep.arn
+    lex_bot_alias_arn         = awscc_lex_bot_alias.this.arn
+    lex_bot_banking_alias_arn = module.lex_bot_banking.bot_alias_arn
+    lex_bot_sales_alias_arn   = module.lex_bot_sales.bot_alias_arn
+    queue_arn                 = aws_connect_queue.queues["GeneralAgentQueue"].arn
+    beep_prompt_arn           = data.aws_connect_prompt.beep.arn
   })
   tags = var.tags
 
   depends_on = [
     awscc_lex_bot_alias.this,
+    module.lex_bot_banking,
+    module.lex_bot_sales,
     aws_connect_queue.queues,
     data.aws_connect_prompt.beep
   ]
@@ -2420,6 +2553,37 @@ resource "aws_cloudwatch_dashboard" "main" {
   })
 }
 
+# =====================================================================================================================
+# CONNECT BOT ASSOCIATIONS
+# =====================================================================================================================
+
+# Associate Main Gateway Bot
+resource "aws_connect_bot_association" "main" {
+  instance_id = module.connect_instance.id
+  lex_bot {
+    lex_region = data.aws_region.current.name
+    name       = awscc_lex_bot_alias.this.arn 
+  }
+}
+
+# Associate Banking Bot
+resource "aws_connect_bot_association" "banking" {
+  instance_id = module.connect_instance.id
+  lex_bot {
+    lex_region = data.aws_region.current.name
+    name       = module.lex_bot_banking.bot_alias_arn
+  }
+}
+
+# Associate Sales Bot
+resource "aws_connect_bot_association" "sales" {
+  instance_id = module.connect_instance.id
+  lex_bot {
+    lex_region = data.aws_region.current.name
+    name       = module.lex_bot_sales.bot_alias_arn
+  }
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Centralized Log Archiving to S3 via Firehose
 # ---------------------------------------------------------------------------------------------------------------------
@@ -2448,6 +2612,38 @@ resource "aws_cloudwatch_log_subscription_filter" "bedrock_mcp_logs" {
 resource "aws_cloudwatch_log_subscription_filter" "lex_logs" {
   name            = "Lex-to-S3"
   log_group_name  = aws_cloudwatch_log_group.lex_logs.name
+  filter_pattern  = ""
+  destination_arn = module.log_archive_firehose.delivery_stream_arn
+  role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "banking_lex_logs" {
+  name            = "BankingLex-to-S3"
+  log_group_name  = aws_cloudwatch_log_group.banking_lex_logs.name
+  filter_pattern  = ""
+  destination_arn = module.log_archive_firehose.delivery_stream_arn
+  role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "sales_lex_logs" {
+  name            = "SalesLex-to-S3"
+  log_group_name  = aws_cloudwatch_log_group.sales_lex_logs.name
+  filter_pattern  = ""
+  destination_arn = module.log_archive_firehose.delivery_stream_arn
+  role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "banking_lambda_logs" {
+  name            = "BankingLambda-to-S3"
+  log_group_name  = aws_cloudwatch_log_group.banking_lambda_logs.name
+  filter_pattern  = ""
+  destination_arn = module.log_archive_firehose.delivery_stream_arn
+  role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "sales_lambda_logs" {
+  name            = "SalesLambda-to-S3"
+  log_group_name  = aws_cloudwatch_log_group.sales_lambda_logs.name
   filter_pattern  = ""
   destination_arn = module.log_archive_firehose.delivery_stream_arn
   role_arn        = module.log_archive_firehose.cloudwatch_to_firehose_role_arn

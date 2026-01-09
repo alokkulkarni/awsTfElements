@@ -13,6 +13,14 @@ output "lex_bot_id" {
   value       = module.lex_bot.bot_id
 }
 
+output "specialized_bots" {
+    description = "Details of the specialized bots"
+    value = {
+        banking_arn = module.lex_bot_banking.bot_alias_arn
+        sales_arn   = module.lex_bot_sales.bot_alias_arn
+    }
+}
+
 output "lex_bot_name" {
   description = "The name of the Lex Bot"
   value       = module.lex_bot.bot_name

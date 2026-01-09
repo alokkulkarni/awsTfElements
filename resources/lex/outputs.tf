@@ -21,5 +21,13 @@ output "bot_locale_id" {
 }
 
 output "chat_intent_id" {
-  value = aws_lexv2models_intent.chat.id
+  value = length(aws_lexv2models_intent.chat) > 0 ? aws_lexv2models_intent.chat[0].id : null
+}
+
+output "bot_alias_arn" {
+  value = awscc_lex_bot_alias.this.arn
+}
+
+output "bot_alias_id" {
+  value = awscc_lex_bot_alias.this.bot_alias_id
 }

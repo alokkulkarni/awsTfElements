@@ -668,25 +668,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                 }
             }
         },
-        {
-            "toolSpec": {
-                "name": "get_debit_card_info",
-                "description": "Get information about ordering a debit card, including eligibility, types available, and delivery timeline.",
-                "inputSchema": {
-                    "json": {
-                        "type": "object",
-                        "properties": {
-                            "card_type": {
-                                "type": "string",
-                                "description": "Type of debit card",
-                                "enum": ["standard", "premium", "contactless", "virtual"]
-                            }
-                        },
-                        "required": ["card_type"]
-                    }
-                }
-            }
-        },
+
         {
             "toolSpec": {
                 "name": "find_nearest_branch",
@@ -712,17 +694,28 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
         }
     ]
 
-def call_bedrock_with_tools(user_message: str, conversation_history: List[Dict] = None, is_first_message: bool = False) -> Dict[str, Any]:
+def call_bedrock_with_tools(user_message: str, conversation_history: List[Dict] = None, is_first_message: bool = False, session_attributes: Dict[str, str] = None) -> Dict[str, Any]:
     """
     Call Bedrock model with tool definitions for intent classification and response generation.
     """
     if conversation_history is None:
         conversation_history = []
+
+    if session_attributes is None:
+        session_attributes = {}
     
     # Build greeting rule based on whether this is the first message
     greeting_rule = """4. ⚠️ CRITICAL GREETING RULE:
    - IF this is the FIRST customer message in the conversation: You MUST introduce yourself by saying "Hello! This is Emma Thompson from the branch helpline. [then answer their question]"
    - IF this is NOT the first message (continuing conversation): NEVER say "Hello", "Hi", or greet again - respond directly""" if is_first_message else """4. ⚠️ CRITICAL: NEVER say "Hello" or "Hi" in your responses - you already introduced yourself at the start of this conversation"""
+    
+    # Build context from session attributes (Memory Safety Net)
+    context_prompt = ""
+    if session_attributes:
+        last_action = session_attributes.get('last_action')
+        bot_source = session_attributes.get('bot_source')
+        if last_action:
+            context_prompt = f"\n5. 🧠 MEMORY CONTEXT:\n   - User previously performed action: '{last_action}' in '{bot_source}'.\n   - If user asks follow-up questions (e.g. 'what does that mean?'), refer to this previous action."
     
     # System prompt defining the banking agent persona with natural conversation guidelines
     system_prompt = f"""You are Emma Thompson, a professional banking specialist at the branch helpline. Your ONLY job is to have a natural conversation by asking ONE question at a time and waiting for the customer to respond.
@@ -732,7 +725,8 @@ def call_bedrock_with_tools(user_message: str, conversation_history: List[Dict] 
 2. NEVER ask two questions in the same response
 3. NEVER call tools until you have collected ALL required information
 {greeting_rule}
-5. If customer provides ALL info at once (type + method), acknowledge and call appropriate tool
+{context_prompt}
+6. If customer provides ALL info at once (type + method), acknowledge and call appropriate tool
 6. If input is unclear or doesn't match expected options, ask customer to clarify
 7. NEVER disclose you are an AI, bot, assistant, or automated system
 8. NEVER generate random phone numbers, addresses, or contact information
@@ -862,16 +856,6 @@ If customer says ANY of these phrases, IMMEDIATELY transfer:
 Your response should be EXACTLY:
 "Of course! Let me transfer you to a specialist now."
 DO NOT ask about branches, location, or anything else. JUST TRANSFER.
-
-🔐 SECURITY-SENSITIVE REQUESTS (Balance, Transactions):
-Customer: "What's my balance?"
-You: "I'd be happy to help you check that. For security, I can't access account details directly, but I can connect you with a specialist who can verify your identity and help you. Would you like me to transfer you?"
-[If yes → transfer. If no → suggest online banking/app]
-
-💳 DEBIT CARDS:
-Step 1: Ask ONLY "Are you looking for a standard debit card, or one with rewards/travel benefits?"
-Step 2: WAIT → Customer responds → Call get_debit_card_options
-Step 3: Explain card → Ask "Would you like to know how to order it?"
 
 📍 BRANCH LOCATIONS:
 Step 1: Ask ONLY "What area or postcode works best for you?"
@@ -1278,34 +1262,7 @@ def lambda_handler(event, context):
         
         logger.info(f"Processing request - Intent: {intent_name}, Input: {input_transcript}")
 
-        # ---------------------------------------------------------------------
-        # DISPATCH TO SPECIALIZED LAMBDAS (Hybrid Architecture)
-        # ---------------------------------------------------------------------
-        # If the intent matches one of our specialized, deterministic intents,
-        # we bypass Bedrock and invoke the specific Lambda directly.
-        specialized_handler_arn = os.environ.get(f"LAMBDA_{intent_name.upper()}")
-        
-        if specialized_handler_arn:
-            logger.info(f"DISPATCHING to specialized Lambda for intent: {intent_name}")
-            try:
-                # Invoke the child Lambda synchronously
-                client = boto3.client('lambda')
-                response = client.invoke(
-                    FunctionName=specialized_handler_arn,
-                    InvocationType='RequestResponse',
-                    Payload=json.dumps(event)
-                )
-                
-                # Parse and return the response from the child Lambda
-                payload = json.loads(response['Payload'].read())
-                logger.info(f"Received response from specialized Lambda: {json.dumps(payload)}")
-                return payload
-                
-            except Exception as e:
-                logger.error(f"Error invoking specialized Lambda {specialized_handler_arn}: {str(e)}")
-                # Fallback to Bedrock if dispatch fails? Or return error?
-                # For now, let's treat it as a technical error and let the main handler handle it via TransferToAgent logic below
-                pass
+
 
         # Handle empty/blank input (silence timeout)
         if not input_transcript or not input_transcript.strip():
@@ -1371,7 +1328,7 @@ def lambda_handler(event, context):
         
         # Call Bedrock Converse API with the user's message
         # Pass is_first_message flag so system prompt can instruct proper greeting behavior
-        bedrock_response = call_bedrock_with_tools(input_transcript, conversation_history, is_first_message)
+        bedrock_response = call_bedrock_with_tools(input_transcript, conversation_history, is_first_message, session_attributes)
         
         # Check for handover need before processing response
         should_handover, handover_reason, handover_message = detect_handover_need(

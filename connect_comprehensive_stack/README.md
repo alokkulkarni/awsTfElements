@@ -4,7 +4,7 @@ This Terraform stack deploys a complete Amazon Connect environment with a Bedroc
 
 ## Features
 - **Amazon Connect**: Core contact center instance with Contact Lens, Flow Logs, and comprehensive queue management.
-- **Bedrock-Primary Hybrid Architecture**: Combines Claude 3.5 Sonnet for conversational AI with specialized deterministic Lambdas for high-speed, low-cost transaction processing.
+- **Federated Hybrid Architecture**: A "Hub and Spoke" design where a Gateway Bot routes to specialized Bedrock for general queries or dedicated Sub-Bots (Banking, Sales) for deterministic workflows.
 - **Data Lake & Analytics**: Serverless data pipeline (Kinesis -> Firehose -> S3 -> Athena) for deep analysis of:
     - Contact Trace Records (CTRs)
     - Agent Events

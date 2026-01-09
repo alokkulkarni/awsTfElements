@@ -3,11 +3,12 @@
 ## Quick Start Summary
 
 This guide provides step-by-step instructions to transform the current AWS Connect stack into a production-ready financial services contact center with:
-- ✅ Modular contact flows (voice & chat separation)
-- ✅ Enhanced Lambda handlers with 15+ financial intents
+- ✅ **Federated Bot Architecture** (Gateway + Banking + Sales Bots)
+- ✅ Enhanced Modular Contact Flows
 - ✅ Production-grade error handling and resilience
 - ✅ Security and compliance features
 - ✅ Comprehensive monitoring and alerting
+
 
 ## Files Created
 

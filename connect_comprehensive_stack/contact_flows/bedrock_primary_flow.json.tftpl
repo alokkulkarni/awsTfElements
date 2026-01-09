@@ -1,205 +1,85 @@
 {
   "Version": "2019-10-30",
-  "StartAction": "set-caller-id",
+  "StartAction": "InitialGreeting",
   "Metadata": {
     "entryPointPosition": {
-      "x": -472.8,
-      "y": -234.4
+      "x": 20,
+      "y": 20
     },
     "ActionMetadata": {
-      "disconnect": {
-        "position": {
-          "x": 1342.4,
-          "y": 815.2
-        }
-      },
-      "transfer-to-agent": {
-        "position": {
-          "x": 1029.6,
-          "y": 662.4
-        }
-      },
-      "set-caller-id": {
-        "position": {
-          "x": -367.2,
-          "y": -203.2
-        },
-        "dynamicParams": []
-      },
       "InitialGreeting": {
         "position": {
-          "x": -110.4,
-          "y": -97.6
-        },
-        "isFriendlyName": true
-      },
-      "set-queue": {
-        "position": {
-          "x": 790.4,
-          "y": 532
+          "x": 180,
+          "y": 20
         }
       },
-      "set-conversation-context": {
+      "GatewayBot": {
         "position": {
-          "x": 597.6,
-          "y": 257.6
-        },
-        "dynamicParams": []
-      },
-      "connect-to-lex": {
-        "position": {
-          "x": 120,
-          "y": 42.4
+          "x": 400,
+          "y": 20
         },
         "parameters": {
-          "PromptId": {
-            "displayName": "Beep.wav"
-          },
           "LexV2Bot": {
-            "AliasArn": {
-              "lexV2BotName": ""
-            }
+            "AliasArn": "${lex_bot_alias_arn}"
           }
-        },
-        "promptName": "Beep.wav",
-        "dynamicMetadata": {
-          "x-amz-lex:audio:start-timeout-ms": false
-        },
-        "lexV2BotName": "",
-        "conditionMetadata": [
-          {
-            "id": "cfc9c064-a1b5-4ca5-951f-e84d1352207e",
-            "operator": {
-              "name": "Equals",
-              "value": "Equals",
-              "shortDisplay": "="
-            },
-            "value": "TransferToAgent"
-          }
-        ]
+        }
       },
-      "error-handler": {
+      "BankingBot": {
         "position": {
-          "x": 341.6,
-          "y": 222.4
+          "x": 700,
+          "y": 200
         },
         "parameters": {
-          "PromptId": {
-            "displayName": "Beep.wav"
+          "LexV2Bot": {
+            "AliasArn": "${lex_bot_banking_alias_arn}"
           }
+        }
+      },
+      "SalesBot": {
+        "position": {
+          "x": 700,
+          "y": 400
         },
-        "promptName": "Beep.wav"
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": "${lex_bot_sales_alias_arn}"
+          }
+        }
+      },
+      "TransferToQueue": {
+        "position": {
+          "x": 1000,
+          "y": 300
+        }
+      },
+      "Disconnect": {
+        "position": {
+          "x": 1000,
+          "y": 100
+        }
+      },
+      "LoopPrompt": {
+        "position": {
+          "x": 400,
+          "y": 300
+        }
       }
-    },
-    "Annotations": [],
-    "name": "BedrockPrimaryFlow",
-    "description": "Bedrock-primary architecture with multi-turn conversation and intelligent agent transfer - PRIMARY FLOW FOR PHONE NUMBERS",
-    "type": "contactFlow",
-    "status": "PUBLISHED",
-    "hash": {}
+    }
   },
   "Actions": [
     {
-      "Parameters": {},
-      "Identifier": "disconnect",
-      "Type": "DisconnectParticipant",
-      "Transitions": {}
-    },
-    {
       "Parameters": {
-        "RetryDelaySeconds": "120",
-        "InitialCallDelaySeconds": "30",
-        "MaximumConnectionAttempts": "1",
-        "CallbackMode": "AgentFirst"
-      },
-      "Identifier": "transfer-to-agent",
-      "Type": "CreateCallbackContact",
-      "Transitions": {
-        "NextAction": "disconnect",
-        "Errors": [
-          {
-            "NextAction": "disconnect",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
-    },
-    {
-      "Parameters": {
-        "Attributes": {
-          "customer_number": "$.SystemEndpoint.Address",
-          "customerPhoneNumber": "$.SystemEndpoint.Address"
-        }
-      },
-      "Identifier": "set-caller-id",
-      "Type": "UpdateContactAttributes",
-      "Transitions": {
-        "NextAction": "InitialGreeting",
-        "Errors": [
-          {
-            "NextAction": "InitialGreeting",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
-    },
-    {
-      "Parameters": {
-        "Text": "Hello! Welcome to our banking service. Please note that calls might be recorded for quality and training purposes. Let me transfer you to one of our agents who will be able to assist you with your banking queries?"
+        "Text": "Hello! Welcome to the Federated Banking Assistant. How can I help you today?"
       },
       "Identifier": "InitialGreeting",
       "Type": "MessageParticipant",
       "Transitions": {
-        "NextAction": "connect-to-lex",
-        "Errors": [
-          {
-            "NextAction": "connect-to-lex",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
+        "NextAction": "GatewayBot",
+        "Errors": []
       }
     },
     {
       "Parameters": {
-        "QueueId": "$.Attributes.target_queue_arn"
-      },
-      "Identifier": "set-queue",
-      "Type": "UpdateContactTargetQueue",
-      "Transitions": {
-        "NextAction": "transfer-to-agent",
-        "Errors": [
-          {
-            "NextAction": "disconnect",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
-    },
-    {
-      "Parameters": {
-        "Attributes": {
-          "ConversationSummary": "$.Attributes.conversation_summary",
-          "HandoverReason": "$.Attributes.handover_reason",
-          "LexIntent": "$.Attributes.lex_intent",
-          "TargetQueueArn": "$.Attributes.target_queue_arn",
-          "CustomerContext": "Transferred from AI assistant - Emma Thompson"
-        }
-      },
-      "Identifier": "set-conversation-context",
-      "Type": "UpdateContactAttributes",
-      "Transitions": {
-        "NextAction": "set-queue",
-        "Errors": [
-          {
-            "NextAction": "set-queue",
-            "ErrorType": "NoMatchingError"
-          }
-        ]
-      }
-    },
-    {
-      "Parameters": {
-        "PromptId": "${beep_prompt_arn}",
         "LexV2Bot": {
           "AliasArn": "${lex_bot_alias_arn}"
         },
@@ -207,28 +87,98 @@
           "x-amz-lex:audio:start-timeout-ms": "5000"
         }
       },
-      "Identifier": "connect-to-lex",
+      "Identifier": "GatewayBot",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "error-handler",
+        "NextAction": "LoopPrompt",
         "Conditions": [
           {
-            "NextAction": "set-conversation-context",
+            "NextAction": "TransferToQueue",
             "Condition": {
               "Operator": "Equals",
-              "Operands": [
-                "TransferToAgent"
-              ]
+              "Operands": ["TransferToAgent"]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["CheckBalance"]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["TransferMoney"]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["GetStatement"]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["CancelDirectDebit"]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["CancelStandingOrder"]
+            }
+          },
+          {
+            "NextAction": "SalesBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["ProductInfo"]
+            }
+          },
+          {
+            "NextAction": "SalesBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["Pricing"]
+            }
+          }
+        ],
+        "Errors": [
+           {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+           }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_banking_alias_arn}"
+        }
+      },
+      "Identifier": "BankingBot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "LoopPrompt",
+        "Conditions": [
+          {
+             "NextAction": "TransferToQueue",
+             "Condition": {
+              "Operator": "Equals",
+              "Operands": ["TransferToAgent"]
             }
           }
         ],
         "Errors": [
           {
-            "NextAction": "error-handler",
-            "ErrorType": "NoMatchingCondition"
-          },
-          {
-            "NextAction": "error-handler",
+            "NextAction": "LoopPrompt",
             "ErrorType": "NoMatchingError"
           }
         ]
@@ -236,19 +186,58 @@
     },
     {
       "Parameters": {
-        "PromptId": "${beep_prompt_arn}"
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_sales_alias_arn}"
+        }
       },
-      "Identifier": "error-handler",
-      "Type": "MessageParticipant",
+      "Identifier": "SalesBot",
+      "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "set-conversation-context",
+        "NextAction": "LoopPrompt",
+        "Conditions": [
+          {
+             "NextAction": "TransferToQueue",
+             "Condition": {
+              "Operator": "Equals",
+              "Operands": ["TransferToAgent"]
+            }
+          }
+        ],
         "Errors": [
           {
-            "NextAction": "set-queue",
+            "NextAction": "LoopPrompt",
             "ErrorType": "NoMatchingError"
           }
         ]
       }
+    },
+    {
+      "Parameters": {
+        "Text": "Is there anything else I can help you with?"
+      },
+      "Identifier": "LoopPrompt",
+      "Type": "MessageParticipant",
+      "Transitions": {
+        "NextAction": "GatewayBot",
+        "Errors": []
+      }
+    },
+    {
+      "Parameters": {
+        "QueueId": "${queue_arn}"
+      },
+      "Identifier": "TransferToQueue",
+      "Type": "TransferContactToQueue",
+      "Transitions": {
+        "NextAction": "Disconnect",
+        "Errors": []
+      }
+    },
+    {
+      "Parameters": {},
+      "Identifier": "Disconnect",
+      "Type": "DisconnectParticipant",
+      "Transitions": {}
     }
   ]
 }

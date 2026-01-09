@@ -64,6 +64,7 @@ resource "aws_lexv2models_bot_locale" "this" {
 
 
 resource "aws_lexv2models_intent" "chat" {
+  count       = var.enable_chat_intent ? 1 : 0
   bot_id      = aws_lexv2models_bot.this.id
   bot_version = "DRAFT"
   locale_id   = aws_lexv2models_bot_locale.this.locale_id
@@ -107,6 +108,50 @@ resource "aws_lexv2models_intent" "fallback" {
   lifecycle {
     ignore_changes = [name]
   }
+}
+
+resource "aws_lexv2models_bot_version" "this" {
+  bot_id = aws_lexv2models_bot.this.id
+  locale_specification = {
+    (var.locale) = {
+      source_bot_version = "DRAFT"
+    }
+  }
+}
+
+resource "awscc_lex_bot_alias" "this" {
+  bot_id      = aws_lexv2models_bot.this.id
+  bot_alias_name = "prod"
+  bot_version = aws_lexv2models_bot_version.this.bot_version
+  
+  conversation_log_settings = var.conversation_log_group_arn != null ? {
+    text_log_settings = [
+      {
+        enabled = true
+        destination = {
+          cloudwatch = {
+            cloudwatch_log_group_arn = var.conversation_log_group_arn
+            log_prefix               = "lex-logs"
+          }
+        }
+      }
+    ]
+  } : null
+
+  bot_alias_locale_settings = [
+    {
+      locale_id = var.locale
+      bot_alias_locale_setting = {
+        enabled = true
+        code_hook_specification = {
+          lambda_code_hook = {
+            lambda_arn = var.fulfillment_lambda_arn
+            code_hook_interface_version = "1.0"
+          }
+        }
+      }
+    }
+  ]
 }
 
 
