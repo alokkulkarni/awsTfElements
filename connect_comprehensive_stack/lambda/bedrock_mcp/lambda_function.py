@@ -1167,6 +1167,81 @@ def determine_target_queue(user_message: str, conversation_history: List[Dict]) 
     logger.info("Routing to GeneralAgentQueue (default)")
     return queue_general
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Specialized Intent Detection (Routing to Other Lex Bots)
+# ---------------------------------------------------------------------------------------------------------------------
+
+def detect_specialized_intent(user_message: str) -> tuple:
+    """
+    Detect if the user message matches a specialized intent that should be handled
+    by a deterministic downstream Lex bot (BankingBot or SalesBot).
+    
+    Returns: (is_specialized, intent_name, bot_type)
+    """
+    text = user_message.lower()
+    
+    # Banking Bot Intents
+    
+    # 1. Check Balance
+    if any(k in text for k in ["balance", "how much money", "funds available", "account status"]):
+        return (True, "CheckBalance", "BankingBot")
+        
+    # 2. Transfer Money
+    if any(k in text for k in ["transfer", "send money", "make a payment", "pay someone", "payment to"]):
+        return (True, "TransferMoney", "BankingBot")
+        
+    # 3. Get Statement / Transactions
+    if any(k in text for k in ["statement", "transaction", "recent movements", "history", "last spending"]):
+        return (True, "GetStatement", "BankingBot")
+        
+    # 4. Direct Debits & Standing Orders
+    if any(k in text for k in ["direct debit", "standing order", "cancel payment", "stop payment"]):
+        if "direct debit" in text:
+            return (True, "CancelDirectDebit", "BankingBot")
+        else:
+            return (True, "CancelStandingOrder", "BankingBot")
+            
+    # Sales Bot Intents
+    
+    # 5. Product Info / Rates
+    if any(k in text for k in ["interest rate", "loan rate", "mortgage rate", "credit card type", "product details"]):
+        return (True, "ProductInfo", "SalesBot")
+        
+    # 6. Pricing / Fees
+    if any(k in text for k in ["fee", "charge", "pricing", "cost"]):
+        return (True, "Pricing", "SalesBot")
+        
+    return (False, None, None)
+
+def initiate_specialized_bot_transfer(intent_name: str, user_message: str) -> Dict[str, Any]:
+    """
+    Return a response that signals Connect to transition to a specialized Lex bot.
+    """
+    logger.info(f"[ROUTING] Transferring to specialized bot with intent: {intent_name}")
+    
+    return {
+        "sessionState": {
+            "dialogAction": {
+                "type": "Close"
+            },
+            "intent": {
+                "name": intent_name,
+                "state": "Fulfilled"
+            },
+            "sessionAttributes": {
+                "lex_intent": intent_name,
+                "routing_reason": "specialized_bot_routing",
+                "original_utterance": user_message
+            }
+        },
+        "messages": [
+            {
+                "contentType": "PlainText",
+                "content": f"I can definitely help you with that. Transferring you to our secure {intent_name.replace('Check', 'Checking ').replace('Get', 'Statement ')} system."
+            }
+        ]
+    }
+
 def initiate_agent_handover(conversation_history: List[Dict], handover_reason: str, user_message: str) -> Dict[str, Any]:
     """
     Format response to trigger agent handover in Connect.
@@ -1325,6 +1400,20 @@ def lambda_handler(event, context):
         is_first_message = len(conversation_history) == 0
         if is_first_message:
             logger.info(f"[FIRST MESSAGE] Session {session_id} - Emma will introduce herself in response")
+            
+        # ------------------------------------------------------------------
+        # ROUTING CHECK: Specialized Lex Bots (Banking / Sales)
+        # ------------------------------------------------------------------
+        # Check if this request should be handled by a specialized bot instead of Bedrock
+        is_specialized, special_intent, bot_type = detect_specialized_intent(input_transcript)
+        
+        if is_specialized:
+            logger.info(f"[ROUTING] Input '{input_transcript}' matched specialized intent '{special_intent}' for '{bot_type}'")
+            # Save the user query to history before transferring
+            conversation_history.append({"role": "user", "content": input_transcript})
+            save_conversation_turn(session_id, "user", input_transcript, caller_id)
+            
+            return initiate_specialized_bot_transfer(special_intent, input_transcript)
         
         # Call Bedrock Converse API with the user's message
         # Pass is_first_message flag so system prompt can instruct proper greeting behavior
