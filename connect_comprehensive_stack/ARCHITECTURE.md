@@ -416,3 +416,161 @@ Key technical decisions shaping this architecture.
 *   **LLM Cold Starts**: The first invocation of the Bedrock Lambda after inactivity may experience a 3-5s cold start latency due to the heavy AWS SDK initialization. *Mitigation: Provisioned Concurrency enabled.*
 *   **Voice/Speech Transcription**: Lex V2 transcription accuracy for alphanumeric strings (like Postcodes or Account IDs) can be inconsistent in noisy environments. *Mitigation: DTMF fallback logic or specialized slot types implemented in key areas.*
 *   **Token Limits**: Single-turn context limit is set to 4096 tokens. Extremely long conversations may lose context of the earliest turns as they are rolled off the DynamoDB history buffer.
+
+## 14. Agent Handover & Context Propagation
+
+Integration between AI and Human Agents is critical. The system supports "Warm Handover" where the agent receives the full context of the AI conversation.
+
+### 14.1 Universal Handover Sequence (ASCII)
+This flow demonstrates how a call can be transferred to a human agent at **any stage** of the interaction (Generative, Specialized, or Error State).
+
+```
+                                            [ DECISION POINT ]
+                                                   |
+        +-----------------+         +--------------+-------------+          +------------------+
+        |  Generative AI  |         |   Specialized Bot Flow     |          |   System Error   |
+        |  (Bedrock)      |         |   (Banking/Sales)          |          |   (Timeout/Fail) |
+        +--------+--------+         +--------------+-------------+          +---------+--------+
+                 |                                 |                                  |
+    1. User asks |                    2. User asks |                    3. Max Retries|
+    "Talk to     |                    "Agent please"                 Exceeded / Error|
+    Human"       |                    OR Logic Fail|                                  |
+                 v                                 v                                  v
+        +--------+--------+         +--------------+-------------+          +---------+--------+
+        | Lambda returns  |         | Specialized Intent         |          | Connect Error    |
+        | "TransferToAgent"         | "Fallback / Transfer"      |          | Handler          |
+        +--------+--------+         +--------------+-------------+          +---------+--------+
+                 |                                 |                                  |
+                 +----------------+----------------+----------------------------------+
+                                  |
+                                  v
+                         +--------+--------+
+                         | Connect Flow    |
+                         | Logic           |
+                         +--------+--------+
+                                  |
+                 1. Set Contact Attributes (Context)
+                    - "handover_reason": "User Request" / "Error"
+                    - "conversation_summary": "User asked about checking account..."
+                    - "sentiment_score": "-0.5" (if angry)
+                                  |
+                                  v
+                         +--------+--------+
+                         | Transfer to     |
+                         | Generic Queue   |
+                         +--------+--------+
+                                  |
+                                  v
+                         +--------+--------+
+                         | Agent CCP       |
+                         | (Screen Pop)    |
+                         +-----------------+
+```
+
+### 14.2 Context Propagation Lifecycle (ASCII)
+Data flows through the system using a combination of **Amazon Connect Contact Attributes** (temporary, per-call) and **DynamoDB** (persistent, multi-turn).
+
+```
+  Stage 1: Entry        Stage 2: Generative     Stage 3: Specialized      Stage 4: Agent
+  (Connect Inbound)     (Bedrock Lambda)        (Lex V2 Bot)              (Custom CCP)
+
+  +-------------+       +-----------------+     +------------------+      +---------------+
+  | Contact     |       | DynamoDB        |     | Lex Session      |      | Contact       |
+  | Attributes  |------>| (History)       |---->| Attributes       |----->| Attributes    |
+  +-------------+       +-----------------+     +------------------+      +---------------+
+  | - User Phone|       | - SessionID     |     | - verified_pin   |      | - Summary     |
+  | - System    |       | - Turn 1 (User) |     | - acct_type      |      | - Sentinel    |
+  |   Points    |       | - Turn 1 (AI)   |     | - intent_conf    |      | - Sentiment   |
+  +------+------+       +--------+--------+     +---------+--------+      +-------+-------+
+         |                       |                        |                       |
+         | (Initialize)          | (Read/Write)           | (Handshake)           | (Display)
+         v                       v                        v                       v
+  +------+------+       +--------+--------+     +---------+--------+      +-------+-------+
+  | Connect     |       | Bedrock MCP     |     | Banking Lambda   |      | Agent Screen  |
+  | State       |       | Logic           |     | Logic            |      | Pop (UI)      |
+  +-------------+       +-----------------+     +------------------+      +---------------+
+```
+
+#### Context Data Dictionary
+*   **System Context**: Passed implicitly by Connect (ANI, DNIS, Queue Name).
+*   **Conversation Context**: Stored in DynamoDB ( table), keyed by Contact ID. Allows the Bedrock Lambda to "remember" previous turns.
+*   **Handover Context**: Explicit attributes set in the Contact Flow before transferring to a queue (, ). These are displayed to the agent immediately upon call acceptance.
+
+## 14. Agent Handover & Context Propagation
+
+Integration between AI and Human Agents is critical. The system supports "Warm Handover" where the agent receives the full context of the AI conversation.
+
+### 14.1 Universal Handover Sequence (ASCII)
+This flow demonstrates how a call can be transferred to a human agent at **any stage** of the interaction (Generative, Specialized, or Error State).
+
+```
+                                            [ DECISION POINT ]
+                                                   |
+        +-----------------+         +--------------+-------------+          +------------------+
+        |  Generative AI  |         |   Specialized Bot Flow     |          |   System Error   |
+        |  (Bedrock)      |         |   (Banking/Sales)          |          |   (Timeout/Fail) |
+        +--------+--------+         +--------------+-------------+          +---------+--------+
+                 |                                 |                                  |
+    1. User asks |                    2. User asks |                    3. Max Retries|
+    "Talk to     |                    "Agent please"                 Exceeded / Error|
+    Human"       |                    OR Logic Fail|                                  |
+                 v                                 v                                  v
+        +--------+--------+         +--------------+-------------+          +---------+--------+
+        | Lambda returns  |         | Specialized Intent         |          | Connect Error    |
+        | "TransferToAgent"         | "Fallback / Transfer"      |          | Handler          |
+        +--------+--------+         +--------------+-------------+          +---------+--------+
+                 |                                 |                                  |
+                 +----------------+----------------+----------------------------------+
+                                  |
+                                  v
+                         +--------+--------+
+                         | Connect Flow    |
+                         | Logic           |
+                         +--------+--------+
+                                  |
+                 1. Set Contact Attributes (Context)
+                    - "handover_reason": "User Request" / "Error"
+                    - "conversation_summary": "User asked about checking account..."
+                    - "sentiment_score": "-0.5" (if angry)
+                                  |
+                                  v
+                         +--------+--------+
+                         | Transfer to     |
+                         | Generic Queue   |
+                         +--------+--------+
+                                  |
+                                  v
+                         +--------+--------+
+                         | Agent CCP       |
+                         | (Screen Pop)    |
+                         +-----------------+
+```
+
+### 14.2 Context Propagation Lifecycle (ASCII)
+Data flows through the system using a combination of **Amazon Connect Contact Attributes** (temporary, per-call) and **DynamoDB** (persistent, multi-turn).
+
+```
+  Stage 1: Entry        Stage 2: Generative     Stage 3: Specialized      Stage 4: Agent
+  (Connect Inbound)     (Bedrock Lambda)        (Lex V2 Bot)              (Custom CCP)
+
+  +-------------+       +-----------------+     +------------------+      +---------------+
+  | Contact     |       | DynamoDB        |     | Lex Session      |      | Contact       |
+  | Attributes  |------>| (History)       |---->| Attributes       |----->| Attributes    |
+  +-------------+       +-----------------+     +------------------+      +---------------+
+  | - User Phone|       | - SessionID     |     | - verified_pin   |      | - Summary     |
+  | - System    |       | - Turn 1 (User) |     | - acct_type      |      | - Sentinel    |
+  |   Points    |       | - Turn 1 (AI)   |     | - intent_conf    |      | - Sentiment   |
+  +------+------+       +--------+--------+     +---------+--------+      +-------+-------+
+         |                       |                        |                       |
+         | (Initialize)          | (Read/Write)           | (Handshake)           | (Display)
+         v                       v                        v                       v
+  +------+------+       +--------+--------+     +---------+--------+      +-------+-------+
+  | Connect     |       | Bedrock MCP     |     | Banking Lambda   |      | Agent Screen  |
+  | State       |       | Logic           |     | Logic            |      | Pop (UI)      |
+  +-------------+       +-----------------+     +------------------+      +---------------+
+```
+
+#### Context Data Dictionary
+*   **System Context**: Passed implicitly by Connect (ANI, DNIS, Queue Name).
+*   **Conversation Context**: Stored in DynamoDB (`conversation_history` table), keyed by Contact ID. Allows the Bedrock Lambda to "remember" previous turns.
+*   **Handover Context**: Explicit attributes set in the Contact Flow before transferring to a queue (`conversation_summary`, `handover_reason`). These are displayed to the agent immediately upon call acceptance.
