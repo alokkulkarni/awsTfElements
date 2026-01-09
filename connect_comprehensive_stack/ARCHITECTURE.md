@@ -645,3 +645,134 @@ How data reaches the agent:
     *   Supervisors can view the full "Contact Trace Record (CTR)" in the Connect Dashboard.
     *   This CTR includes the **recording**, **transcript** (if Contact Lens used), and the **graphical timeline** of sentiment (Positive/Negative/Neutral) throughout the call.
 
+
+## 17. End-to-End Process Flow (BPMN 2.0)
+
+The following ASCII BPMN 2.0 diagram illustrates the complete end-to-end lifecycle of a contact, highlighting the distinct architectural boundaries (Swimlanes) and the flow of control and data between the Customer, Amazon Connect, the AI Layer, and the Human Agent.
+
+```
++-------------+      +-------------------+      +-------------------------+      +-----------------+
+|   Customer  |      |   Connect (Flow)  |      |    AI Brain (Lambda)    |      |   Human Agent   |
++------+------+      +---------+---------+      +------------+------------+      +--------+--------+
+       |                       |                             |                            |
+   ( Start )                   |                             |                            |
+       |                       |                             |                            |
+       +---------------------->|                             |                            |
+   [Inbound]                   |                             |                            |
+                               v                             |                            |
+                        [Play Greeting]                      |                            |
+                        [Set Recording]                      |                            |
+                               |                             |                            |
+                               v                             |                            |
+                        [Get Customer  ]                     |                            |
+                        [Input (Speech)]                     |                            |
+                               |                             |                            |
+                               v                             |                            |
+                       [Invoke Lambda ]--------------------->|                            |
+                               |                             |                            |
+                               |                    [Restore History]                     |
+                               |                    [DynamoDB Load  ]                     |
+                               |                             |                            |
+                               |                             v                            |
+                               |                     <  Identify Intent  >                |
+                               |                    /        |          \                 |
+                               |             (GenAI)     (Banking)      (Human)           |
+                               |                |            |              |             |
+                               |                v            v              |             |
+                               |          [Generate  ]   [Delegate  ]       v             |
+                               |          [Response  ]   [to Lex Bot]   [Create   ]       |
+                               |                |            |          [Handover ]       |
+                               |                |            |          [Signal   ]       |
+                               |                |            |              |             |
+                               |                |            |              |             |
+                               |                v            v              v             |
+                               |<------------- [ Return Response/Action ] --+             |
+                               |                             |                            |
+                               |                             |                            |
+                       < Check Action Type >                 |                            |
+                      /        |          \                  |                            |
+                 (Speak)       |        (Transfer)           |                            |
+                    |          |             |               |                            |
+      +<------------+          |             v               |                            |
+      |                        |      [Set Attributes]       |                            |
+  [Listen ]                    |      (Context/Sentiment)    |                            |
+  [Respond]                    |             |               |                            |
+      |                        |             v               |                            |
+      +----------------------->|      [Queue Transfer]       |                            |
+                               |             |               |                            |
+                               |             v               |                            |
+                               |      { Wait in Queue } --------------------------------->|
+                               |                             |                            |
+                               |                             |                       [Accept Call]
+                               |                             |                            |
+                               |                             |                            v
+                               |                             |                       [View Context]
+                               |                             |                       [Screen Pop  ]
+                               |                             |                            |
+                               |                             |                            v
+      +<----------------------------------------------------------------------------- [Conversing]
+      |                        |                             |                            |
+   ( End ) <------------------------------------------------------------------------------+
+```
+
+### Legend
+*   **Swimlanes**: Vertical partitions separating responsibilities (Client, Orchestrator, Intelligence, Resolution).
+*   **[ Rectangles ]**: Tasks or Actions performed by a system actor.
+*   **< Diamonds >**: Gateways (Decisions) where the process branches based on logic.
+*   **{ Braces }**: Intermediate Events or States (like Waiting).
+*   **( Circles )**: Start and End events.
+
+
+## 18. Operational Support Model (RACI)
+
+To ensure the stability, security, and efficiency of this "AI-First" Contact Center, specific roles must be assigned. The RACI matrix below defines the responsibility assignment for both the **Build/Engineering** and **Run/Operations** phases.
+
+### 18.1 Key Roles Definition
+
+*   **Cloud Platform Engineer (DevOps)**: Owns the Terraform code, AWS infrastructure (S3, Kinesis, Lambda, VPC), and CI/CD pipelines.
+*   **AI/Conversation Engineer**: Owns the "Brain". Writes Prompts (Bedrock), defines Intents (Lex), and manages Python logic for tool calling.
+*   **Call Center Manager (Ops Lead)**: Non-technical business owner. Manages agents, schedules, and high-level routing strategies.
+*   **Supervisor**: Day-to-day floor management, monitoring live calls, and handling escalations.
+*   **Agent**: The front-line user handling calls and chat.
+*   **Security & Compliance**: Audit role ensuring PII redaction and encryption standards.
+*   **AI Governance Board**: Cross-functional team (Legal/Product) reviewing AI safety, hallucination rates, and tone.
+
+### 18.2 RACI Matrix
+
+**R** = Responsible (Doer) | **A** = Accountable (Owner) | **C** = Consulted (Subject Matter Expert) | **I** = Informed
+
+| Activity / Task | Cloud Engineer (DevOps) | AI Engineer | Ops Lead (Manager) | Supervisor | Security / Compliance | AI Gov Board |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **System Deployment (Terraform)** | **A/R** | C | I | I | C | I |
+| **Prompt Engineering (Bedrock)** | I | **A/R** | C | I | C | C |
+| **Lex Intent Training** | I | **A/R** | C | I | I | I |
+| **Contact Flow Logic Changes** | **R** | C | **A** | I | I | I |
+| **User Management (Add/Remove Agents)** | I | I | **A/R** | C | I | I |
+| **Queue & Routing Profile Config** | C | I | **A/R** | C | I | I |
+| **Handling Live Contacts** | I | I | I | C | I | I |
+| **Handling Escalations** | I | I | C | **A/R** | I | I |
+| **Audit Log Review (PII check)** | I | I | I | I | **A/R** | I |
+| **Hallucination Threshold Tuning** | I | **R** | I | I | C | **A** |
+| **Incident Response (System Down)** | **A/R** | C | C | I | I | I |
+| **Q/A Scorecard Review** | I | I | I | **A/R** | I | I |
+
+### 18.3 Operational Responsibility Segregation
+
+1.  **Engineering (Technical)**
+    *   **Scope**: Anything involving `.tf`, `.py`, or `.json` files.
+    *   **Trigger**: Use standard Git Flow (Pull Requests) to deploy changes.
+    *   **Duties**: Upgrading Lambda runtimes, changing DynamoDB capacity, modifying Bedrock System Prompts.
+
+2.  **Operations (Business/Config)**
+    *   **Scope**: Anything managed via the **Amazon Connect UI**.
+    *   **Trigger**: Instant changes via Dashboard.
+    *   **Duties**:
+        *   Opening/Closing queues for holidays.
+        *   Onboarding new agents (creating users).
+        *   Listening to call recordings for quality assurance.
+        *   Changing "Music on Hold" or simple announcements (if configured dynamically).
+
+3.  **Governance (Safety)**
+    *   **Scope**: Validation Agent logs and Contact Lens reports.
+    *   **Duties**: Weekly review of "AI Insights" dashboard to ensure the bot is not giving financial advice it shouldn't be (Hallucination check).
+
