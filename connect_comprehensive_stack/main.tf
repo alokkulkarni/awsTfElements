@@ -181,11 +181,11 @@ data "aws_connect_security_profile" "call_center_manager" {
   name        = "CallCenterManager"
 }
 
-# Data source for the default Beep.wav prompt
-data "aws_connect_prompt" "beep" {
-  instance_id = module.connect_instance.id
-  name        = "Beep"
-}
+# Data source for the default Beep.wav prompt - REMOVED due to instability
+# data "aws_connect_prompt" "beep" {
+#   instance_id = module.connect_instance.id
+#   name        = "Beep"
+# }
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Routing Profiles
@@ -838,6 +838,8 @@ module "lex_bot" {
   voice_id               = var.voice_id
   enable_chat_intent     = true
   tags                   = var.tags
+  create_alias           = false
+  create_version         = false
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -865,6 +867,8 @@ module "lex_bot_banking" {
   enable_chat_intent     = false # Connects to Banking Intents instead
   conversation_log_group_arn = aws_cloudwatch_log_group.banking_lex_logs.arn
   tags                   = var.tags
+  create_alias           = false
+  create_version         = false
 }
 
 # Dynamic Banking Intents from tfvars
@@ -910,6 +914,8 @@ module "lex_bot_sales" {
   enable_chat_intent     = false
   conversation_log_group_arn = aws_cloudwatch_log_group.sales_lex_logs.arn
   tags                   = var.tags
+  create_alias           = false
+  create_version         = false
 }
 
 resource "aws_lexv2models_intent" "sales_product" {
@@ -922,6 +928,99 @@ resource "aws_lexv2models_intent" "sales_product" {
   sample_utterance { utterance = "Tell me about credit cards" }
 
   fulfillment_code_hook { enabled = true }
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Versions and Aliases for Specialized Bots (Created Outside Module for Dependency Management)
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Banking Bot Version & Alias
+resource "aws_lexv2models_bot_version" "banking" {
+  bot_id      = module.lex_bot_banking.bot_id
+  locale_specification = {
+    (var.locale) = {
+      source_bot_version = "DRAFT"
+    }
+  }
+  depends_on = [
+    aws_lexv2models_intent.banking_intents_from_vars,
+    aws_lexv2models_intent.banking_transfer
+  ]
+}
+
+resource "awscc_lex_bot_alias" "banking" {
+  bot_id         = module.lex_bot_banking.bot_id
+  bot_alias_name = "prod"
+  bot_version    = aws_lexv2models_bot_version.banking.bot_version
+
+  bot_alias_locale_settings = [{
+    locale_id = var.locale
+    bot_alias_locale_setting = {
+      enabled = true
+      code_hook_specification = {
+        lambda_code_hook = {
+          lambda_arn = aws_lambda_alias.banking_live.arn
+          code_hook_interface_version = "1.0"
+        }
+      }
+    }
+  }]
+
+  conversation_log_settings = {
+    text_log_settings = [{
+      enabled = true
+      destination = {
+        cloudwatch = {
+          cloudwatch_log_group_arn = aws_cloudwatch_log_group.banking_lex_logs.arn
+          log_prefix                = "lex-logs"
+        }
+      }
+    }]
+  }
+}
+
+# Sales Bot Version & Alias
+resource "aws_lexv2models_bot_version" "sales" {
+  bot_id      = module.lex_bot_sales.bot_id
+  locale_specification = {
+    (var.locale) = {
+      source_bot_version = "DRAFT"
+    }
+  }
+  depends_on = [
+    aws_lexv2models_intent.sales_product
+  ]
+}
+
+resource "awscc_lex_bot_alias" "sales" {
+  bot_id         = module.lex_bot_sales.bot_id
+  bot_alias_name = "prod"
+  bot_version    = aws_lexv2models_bot_version.sales.bot_version
+
+  bot_alias_locale_settings = [{
+    locale_id = var.locale
+    bot_alias_locale_setting = {
+      enabled = true
+      code_hook_specification = {
+        lambda_code_hook = {
+          lambda_arn = aws_lambda_alias.sales_live.arn
+          code_hook_interface_version = "1.0"
+        }
+      }
+    }
+  }]
+
+  conversation_log_settings = {
+    text_log_settings = [{
+      enabled = true
+      destination = {
+        cloudwatch = {
+          cloudwatch_log_group_arn = aws_cloudwatch_log_group.sales_lex_logs.arn
+          log_prefix                = "lex-logs"
+        }
+      }
+    }]
+  }
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1434,33 +1533,29 @@ resource "aws_cloudwatch_log_resource_policy" "lex_logs" {
 
 # Create Bot Alias pointing to the version
 resource "awscc_lex_bot_alias" "this" {
-  bot_id      = module.lex_bot.bot_id
+  bot_id         = module.lex_bot.bot_id
   bot_alias_name = "prod"
-  bot_version = aws_lexv2models_bot_version.this.bot_version
+  bot_version    = aws_lexv2models_bot_version.this.bot_version
   
   conversation_log_settings = {
-    text_log_settings = [
-      {
-        destination = {
-          cloudwatch = {
-            cloudwatch_log_group_arn = aws_cloudwatch_log_group.lex_logs.arn
-            log_prefix               = "lex-logs"
-          }
+    text_log_settings = [{
+      enabled = true
+      destination = {
+        cloudwatch = {
+          cloudwatch_log_group_arn = aws_cloudwatch_log_group.lex_logs.arn
+          log_prefix               = "lex-logs"
         }
-        enabled = true
       }
-    ]
-    audio_log_settings = [
-      {
-        destination = {
-          s3_bucket = {
-            s3_bucket_arn = module.connect_storage_bucket.arn
-            log_prefix    = "lex-audio-logs"
-          }
+    }]
+    audio_log_settings = [{
+      enabled = false
+      destination = {
+        s3_bucket = {
+          s3_bucket_arn = module.connect_storage_bucket.arn
+          log_prefix    = "lex-audio-logs"
         }
-        enabled = false
       }
-    ]
+    }]
   }
 
   bot_alias_locale_settings = [
@@ -1608,40 +1703,60 @@ resource "aws_connect_queue" "queues" {
 # Associate customer queue flow with GeneralAgentQueue
 # Note: Terraform AWS provider doesn't support default_customer_queue_flow_id parameter yet
 # Using null_resource with AWS CLI to set the association
-resource "null_resource" "associate_customer_queue_flow" {
-  triggers = {
-    queue_id       = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
-    queue_flow_id  = aws_connect_contact_flow.customer_queue.contact_flow_id
-    instance_id    = module.connect_instance.id
-  }
+# COMMENTED OUT: Depends on customer_queue flow which is currently disabled
+# resource "null_resource" "associate_customer_queue_flow" {
+#   triggers = {
+#     queue_id       = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
+#     queue_flow_id  = aws_connect_contact_flow.customer_queue.contact_flow_id
+#     instance_id    = module.connect_instance.id
+#   }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      # Get the current queue configuration
-      INSTANCE_ID="${module.connect_instance.id}"
-      QUEUE_ID="${aws_connect_queue.queues["GeneralAgentQueue"].queue_id}"
-      QUEUE_FLOW_ARN="${aws_connect_contact_flow.customer_queue.arn}"
-      
-      echo "Associating customer queue flow with GeneralAgentQueue..."
-      echo "Instance ID: $INSTANCE_ID"
-      echo "Queue ID: $QUEUE_ID"
-      echo "Queue Flow ARN: $QUEUE_FLOW_ARN"
-      
-      # Use AWS API to associate the flow
-      aws connect associate-flow \
-        --instance-id "$INSTANCE_ID" \
-        --resource-id "$QUEUE_ID" \
-        --flow-id "${aws_connect_contact_flow.customer_queue.contact_flow_id}" \
-        --resource-type QUEUE \
-        --region ${var.region}
-      
-      echo "Customer queue flow associated successfully"
-    EOT
-  }
+#   provisioner "local-exec" {
+#     command = <<-EOT
+#       # Get the current queue configuration
+#       INSTANCE_ID="${module.connect_instance.id}"
+#       QUEUE_ID="${aws_connect_queue.queues["GeneralAgentQueue"].queue_id}"
+#       QUEUE_FLOW_ARN="${aws_connect_contact_flow.customer_queue.arn}"
+#       
+#       echo "Associating customer queue flow with GeneralAgentQueue..."
+#       echo "Instance ID: $INSTANCE_ID"
+#       echo "Queue ID: $QUEUE_ID"
+#       echo "Queue Flow ARN: $QUEUE_FLOW_ARN"
+#       
+#       # Use AWS API to associate the flow
+#       aws connect associate-flow \
+#         --instance-id "$INSTANCE_ID" \
+#         --resource-id "$QUEUE_ID" \
+#         --flow-id "${aws_connect_contact_flow.customer_queue.contact_flow_id}" \
+#         --resource-type QUEUE \
+#         --region ${var.region}
+#       
+#       echo "Customer queue flow associated successfully"
+#     EOT
+#   }
+#
+#   depends_on = [
+#     aws_connect_queue.queues,
+#     aws_connect_contact_flow.customer_queue
+#   ]
+# }
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Queue Transfer Flow (for Quick Connects)
+# ---------------------------------------------------------------------------------------------------------------------
+# This flow is specifically designed for Quick Connects with type "queueTransfer"
+resource "aws_connect_contact_flow" "queue_transfer" {
+  instance_id = module.connect_instance.id
+  name        = "QueueTransferFlow"
+  description = "Transfer to queue flow for Quick Connects"
+  type        = "QUEUE_TRANSFER"
+  content = templatefile("${path.module}/contact_flows/queue_transfer_flow.json.tftpl", {
+    queue_arn = aws_connect_queue.queues["GeneralAgentQueue"].arn
+  })
+  tags = var.tags
 
   depends_on = [
-    aws_connect_queue.queues,
-    aws_connect_contact_flow.customer_queue
+    aws_connect_queue.queues
   ]
 }
 
@@ -1661,11 +1776,15 @@ resource "aws_connect_quick_connect" "queue_transfer" {
     quick_connect_type = "QUEUE"
     queue_config {
       queue_id        = aws_connect_queue.queues[each.key].queue_id
-      contact_flow_id = aws_connect_contact_flow.customer_queue.contact_flow_id
+      contact_flow_id = aws_connect_contact_flow.queue_transfer.contact_flow_id
     }
   }
 
   tags = var.tags
+
+  depends_on = [
+    aws_connect_contact_flow.queue_transfer
+  ]
 }
 
 # Associate ALL Quick Connects with ALL Queues using AWS CLI
@@ -2023,39 +2142,33 @@ resource "aws_connect_contact_flow" "chat_entry" {
 resource "aws_connect_contact_flow" "bedrock_primary" {
   instance_id = module.connect_instance.id
   name        = "BedrockPrimaryFlow"
-  description = "Bedrock-primary architecture with multi-turn conversation and intelligent agent transfer - PRIMARY FLOW FOR PHONE NUMBERS"
+  description = "Simplified Bedrock flow with Lex integration"
   type        = "CONTACT_FLOW"
   content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
-    lex_bot_alias_arn         = awscc_lex_bot_alias.this.arn
-    lex_bot_banking_alias_arn = module.lex_bot_banking.bot_alias_arn
-    lex_bot_sales_alias_arn   = module.lex_bot_sales.bot_alias_arn
-    queue_arn                 = aws_connect_queue.queues["GeneralAgentQueue"].arn
-    beep_prompt_arn           = data.aws_connect_prompt.beep.arn
+    lex_bot_alias_arn = awscc_lex_bot_alias.this.arn
+    queue_arn         = aws_connect_queue.queues["GeneralAgentQueue"].arn
   })
   tags = var.tags
 
   depends_on = [
     awscc_lex_bot_alias.this,
-    module.lex_bot_banking,
-    module.lex_bot_sales,
-    aws_connect_queue.queues,
-    data.aws_connect_prompt.beep
+    null_resource.lex_bot_association,
+    null_resource.validate_bot_alias
   ]
 }
 
 # Customer Queue Flow - Plays while customer waits with position updates and callback option
-resource "aws_connect_contact_flow" "customer_queue" {
-  instance_id = module.connect_instance.id
-  name        = "CustomerQueueFlow"
-  description = "Queue flow with position updates, callback option, and hold music"
-  type        = "CUSTOMER_QUEUE"
-  content = templatefile("${path.module}/contact_flows/customer_queue_flow.json.tftpl", {
-    callback_lambda_arn = module.callback_lambda.arn
-  })
-  tags = var.tags
-
-  depends_on = []
-}
+# COMMENTED OUT: AWS Connect validation failing - requires manual creation or further investigation
+# resource "aws_connect_contact_flow" "customer_queue" {
+#   instance_id = module.connect_instance.id
+#   name        = "CustomerQueueFlow"
+#   description = "Simplified queue flow for customer hold"
+#   type        = "CUSTOMER_QUEUE"
+#   content     = file("${path.module}/contact_flows/customer_queue_flow_simple_v2.json.tftpl")
+#   tags        = var.tags
+#
+#   depends_on = []
+# }
 
 # Task flow to surface claimed callbacks as Connect tasks
 resource "aws_connect_contact_flow" "callback_task" {
@@ -2076,7 +2189,27 @@ resource "null_resource" "lex_bot_association" {
   }
 
   provisioner "local-exec" {
-    command = "aws connect associate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region}"
+    command = <<-EOT
+      aws connect associate-bot \
+        --instance-id ${self.triggers.instance_id} \
+        --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} \
+        --region ${self.triggers.region}
+      
+      # Wait for association to propagate
+      echo "⏳ Waiting for bot association to propagate..."
+      sleep 30
+      
+      # Verify association
+      BOT_ID=$(echo "${self.triggers.bot_alias_arn}" | cut -d'/' -f2)
+      aws connect list-bots \
+        --instance-id ${self.triggers.instance_id} \
+        --region ${self.triggers.region} \
+        --lex-version V2 \
+        --query "LexBots[?LexV2Bot.AliasArn=='${self.triggers.bot_alias_arn}']" \
+        --output text || (echo "❌ Bot association verification failed" && exit 1)
+      
+      echo "✅ Bot ${self.triggers.bot_alias_arn} successfully associated with Connect instance"
+    EOT
   }
 
   provisioner "local-exec" {
@@ -2558,29 +2691,47 @@ resource "aws_cloudwatch_dashboard" "main" {
 # =====================================================================================================================
 
 # Associate Main Gateway Bot
-resource "aws_connect_bot_association" "main" {
-  instance_id = module.connect_instance.id
-  lex_bot {
-    lex_region = data.aws_region.current.name
-    name       = awscc_lex_bot_alias.this.arn 
-  }
-}
+# resource "aws_connect_bot_association" "main" {
+#   instance_id = module.connect_instance.id
+#   lex_bot {
+#     lex_region = data.aws_region.current.name
+#     name       = awscc_lex_bot_alias.this.arn 
+#   }
+# }
 
 # Associate Banking Bot
-resource "aws_connect_bot_association" "banking" {
-  instance_id = module.connect_instance.id
-  lex_bot {
-    lex_region = data.aws_region.current.name
-    name       = module.lex_bot_banking.bot_alias_arn
+resource "null_resource" "banking_bot_association" {
+  triggers = {
+    instance_id   = module.connect_instance.id
+    bot_alias_arn = awscc_lex_bot_alias.banking.arn
+    region        = var.region
+  }
+
+  provisioner "local-exec" {
+    command = "aws connect associate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region}"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws connect disassociate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region} || true"
   }
 }
 
 # Associate Sales Bot
-resource "aws_connect_bot_association" "sales" {
-  instance_id = module.connect_instance.id
-  lex_bot {
-    lex_region = data.aws_region.current.name
-    name       = module.lex_bot_sales.bot_alias_arn
+resource "null_resource" "sales_bot_association" {
+  triggers = {
+    instance_id   = module.connect_instance.id
+    bot_alias_arn = awscc_lex_bot_alias.sales.arn
+    region        = var.region
+  }
+
+  provisioner "local-exec" {
+    command = "aws connect associate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region}"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws connect disassociate-bot --instance-id ${self.triggers.instance_id} --lex-v2-bot AliasArn=${self.triggers.bot_alias_arn} --region ${self.triggers.region} || true"
   }
 }
 

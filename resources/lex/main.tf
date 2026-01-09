@@ -111,6 +111,7 @@ resource "aws_lexv2models_intent" "fallback" {
 }
 
 resource "aws_lexv2models_bot_version" "this" {
+  count = var.create_version ? 1 : 0
   bot_id = aws_lexv2models_bot.this.id
   locale_specification = {
     (var.locale) = {
@@ -120,9 +121,14 @@ resource "aws_lexv2models_bot_version" "this" {
 }
 
 resource "awscc_lex_bot_alias" "this" {
+  count = var.create_alias ? 1 : 0
   bot_id      = aws_lexv2models_bot.this.id
   bot_alias_name = "prod"
-  bot_version = aws_lexv2models_bot_version.this.bot_version
+  # Dependencies
+  bot_version = var.create_version ? aws_lexv2models_bot_version.this[0].bot_version : "DRAFT" 
+  # Wait, if we don't create version, we can't point to it. 
+  # Usually if create_alias is true, create_version should be true, or we point to DRAFT?
+  # But if create_alias=false, we skip this block entirely.
   
   conversation_log_settings = var.conversation_log_group_arn != null ? {
     text_log_settings = [

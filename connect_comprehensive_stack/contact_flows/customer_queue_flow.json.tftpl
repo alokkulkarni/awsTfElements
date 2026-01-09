@@ -82,8 +82,8 @@
       "Type": "GetParticipantInput",
       "Parameters": {
         "Text": "To continue holding, press 1. To request a callback, press 2.",
-        "MaxDigits": 1,
-        "Timeout": 10
+        "MaxDigits": "1",
+        "Timeout": "10"
       },
       "Transitions": {
         "NextAction": "play-hold-music",
@@ -172,7 +172,7 @@
       "Identifier": "wait-30-seconds",
       "Type": "Wait",
       "Parameters": {
-        "WaitTimeSeconds": "30"
+        "WaitTimeSeconds": 30
       },
       "Transitions": {
         "NextAction": "comfort-message"

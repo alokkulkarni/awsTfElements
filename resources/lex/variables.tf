@@ -35,3 +35,15 @@ variable "conversation_log_group_arn" {
   default     = null
 }
 
+variable "create_alias" {
+  description = "Whether to create the default 'prod' alias within the module"
+  type        = bool
+  default     = true
+}
+
+variable "create_version" {
+  description = "Whether to create the default bot version within the module"
+  type        = bool
+  default     = true
+}
+

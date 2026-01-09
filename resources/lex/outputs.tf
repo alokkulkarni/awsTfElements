@@ -25,9 +25,9 @@ output "chat_intent_id" {
 }
 
 output "bot_alias_arn" {
-  value = awscc_lex_bot_alias.this.arn
+  value = var.create_alias ? awscc_lex_bot_alias.this[0].arn : null
 }
 
 output "bot_alias_id" {
-  value = awscc_lex_bot_alias.this.bot_alias_id
+  value = var.create_alias ? awscc_lex_bot_alias.this[0].bot_alias_id : null
 }

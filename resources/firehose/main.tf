@@ -15,7 +15,7 @@ resource "aws_kinesis_firehose_delivery_stream" "log_stream" {
     role_arn   = aws_iam_role.firehose_delivery.arn
     bucket_arn = var.destination_bucket_arn
     prefix     = "${var.destination_prefix}year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
-    error_output_prefix = "${var.destination_prefix}errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+    error_output_prefix = "${var.destination_prefix}errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/!{firehose:error-output-type}/"
 
     buffering_size = 5
     buffering_interval = 300
@@ -79,55 +79,59 @@ resource "aws_iam_policy" "firehose_delivery_policy" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "s3:AbortMultipartUpload",
-          "s3:GetBucketLocation",
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:ListBucketMultipartUploads",
-          "s3:PutObject"
-        ]
-        Effect = "Allow"
-        Resource = [
-          var.destination_bucket_arn,
-          "${var.destination_bucket_arn}/*"
-        ]
-      },
-      {
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Effect = "Allow"
-        Resource = var.kms_key_arn != null ? [var.kms_key_arn] : ["*"]
-        Condition = var.kms_key_arn != null ? {} : {
-            "StringEquals": {
-                "aws:RequestedRegion": data.aws_region.current.name
-            }
-        } 
-      },
-      {
-        Action = [
-          "kinesis:DescribeStream",
-          "kinesis:GetShardIterator",
-          "kinesis:GetRecords",
-          "kinesis:ListShards"
-        ]
-        Effect = "Allow"
-        Resource = var.kinesis_source_arn != null ? [var.kinesis_source_arn] : []
-      },
-      {
-         Action = [
-             "logs:PutLogEvents"
-         ]
-         Effect = "Allow"
-         Resource = [
-             "${aws_cloudwatch_log_group.firehose_error_logging.arn}:*"
-         ]
-      }
-    ]
+    Statement = concat(
+      [
+        {
+          Action = [
+            "s3:AbortMultipartUpload",
+            "s3:GetBucketLocation",
+            "s3:GetObject",
+            "s3:ListBucket",
+            "s3:ListBucketMultipartUploads",
+            "s3:PutObject"
+          ]
+          Effect = "Allow"
+          Resource = [
+            var.destination_bucket_arn,
+            "${var.destination_bucket_arn}/*"
+          ]
+        },
+        {
+          Action = [
+            "kms:Decrypt",
+            "kms:GenerateDataKey"
+          ]
+          Effect = "Allow"
+          Resource = var.kms_key_arn != null ? [var.kms_key_arn] : ["*"]
+          Condition = var.kms_key_arn != null ? {} : {
+              "StringEquals": {
+                  "aws:RequestedRegion": data.aws_region.current.name
+              }
+          } 
+        },
+        {
+           Action = [
+               "logs:PutLogEvents"
+           ]
+           Effect = "Allow"
+           Resource = [
+               "${aws_cloudwatch_log_group.firehose_error_logging.arn}:*"
+           ]
+        }
+      ],
+      var.kinesis_source_arn != null ? [
+        {
+          Action = [
+            "kinesis:DescribeStream",
+            "kinesis:GetShardIterator",
+            "kinesis:GetRecords",
+            "kinesis:ListShards"
+          ]
+          Effect = "Allow"
+          Resource = [var.kinesis_source_arn]
+        }
+      ] : []
+    )
   })
 }
 

@@ -1,0 +1,66 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "greet",
+  "Actions": [
+    {
+      "Identifier": "greet",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Hello! Welcome to our service. Connecting you to an assistant."
+      },
+      "Transitions": {
+        "NextAction": "gateway",
+        "Errors": []
+      }
+    },
+    {
+      "Identifier": "gateway",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
+      },
+      "Transitions": {
+        "NextAction": "transfer",
+        "Conditions": [
+          {
+            "NextAction": "transfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["TransferToAgent"]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "transfer",
+      "Type": "TransferContactToQueue",
+      "Parameters": {
+        "QueueId": "${queue_arn}"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "NextAction": "disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

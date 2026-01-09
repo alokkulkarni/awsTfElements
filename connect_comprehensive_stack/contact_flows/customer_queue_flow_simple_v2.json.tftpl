@@ -1,0 +1,40 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "initial-message",
+  "Actions": [
+    {
+      "Identifier": "initial-message",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for holding. An agent will be with you shortly."
+      },
+      "Transitions": {
+        "NextAction": "hold",
+        "Errors": [],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "hold",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Please continue to hold."
+      },
+      "Transitions": {
+        "NextAction": "wait",
+        "Errors": [],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "wait",
+      "Type": "Wait",
+      "Parameters": {
+        "WaitTimeSeconds": 30
+      },
+      "Transitions": {
+        "NextAction": "hold"
+      }
+    }
+  ]
+}
