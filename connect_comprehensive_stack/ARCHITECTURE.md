@@ -776,3 +776,34 @@ To ensure the stability, security, and efficiency of this "AI-First" Contact Cen
     *   **Scope**: Validation Agent logs and Contact Lens reports.
     *   **Duties**: Weekly review of "AI Insights" dashboard to ensure the bot is not giving financial advice it shouldn't be (Hallucination check).
 
+## 19. Specialized Routing Logic (Hub & Spoke Details)
+
+The system utilizes a **Hub and Spoke** routing architecture where the Bedrock LLM acts as the intelligent "Hub" (Gateway) and specific Lex V2 bots act as deterministic "Spokes". This ensures that high-compliance or transactional requests are never handled by the generative model.
+
+### 19.1 Routing Decision Logic
+Every user utterance is processed by the **Bedrock MCP Lambda** (`bedrock_mcp`), which applies a **Specialized Intent Detection Layer** *before* invoking the LLM.
+
+| User Intent Category | Examples | Detection Method | Action / Destination |
+| :--- | :--- | :--- | :--- |
+| **Transactional Banking** | "Check my balance", "Transfer money", "Cancel direct debit" | Keyword/Regex Match | **Route to BankingBot** (Lex V2) |
+| **Product Information** | "Current mortgage rates", "Credit card fees", "Pricing" | Keyword Match | **Route to SalesBot** (Lex V2) |
+| **Human Support** | "Talk to a human", "Agent please" | Keyword Match | **Handover to Queue** |
+| **General Inquiry** | "How does the app work?", "Where is the nearest branch?" | Default (No Match) | **Process with Bedrock** (GenAI) |
+| **Complex Onboarding** | "I want to open a new student account" | Default (No Match) | **Process with Bedrock** (GenAI + Tools) |
+
+### 19.2 Interaction Flow Sequence
+
+1.  **Ingest**: Amazon Connect receives audio/text and invokes the `GatewayBot` (Lex V2).
+2.  **Fallback**: The `GatewayBot` has a `FallbackIntent` configured to capture *everything* and invoke the `bedrock_mcp` Lambda.
+3.  **Audit**: The Lambda's `lambda_handler` immediately checks the `detect_specialized_intent()` function.
+    *   *If Match*: It returns a specific Lex Intent (e.g., `CheckBalance`).
+    *   *If No Match*: It proceeds to call the `call_bedrock_with_tools()` function.
+4.  **Signal**:
+    *   **For Specialized**: The Lambda returns a `Close` dialog action with the detected Intent Name. Connect detects this intent change and follows the `bedrock_primary_flow` checks to transition to the `BankingBot`.
+    *   **For Generative**: The Lambda returns an `ElicitIntent` dialog action with the LLM's response text, keeping the user in the Gateway context for the next turn.
+
+### 19.3 Benefit Analysis
+*   **Zero Hallucination Risk**: The LLM never sees "Check Balance" requests, so it cannot invent a balance.
+*   **Performance**: Specialized routing avoids the latency of an LLM call (200ms vs 2s).
+*   **Security**: Sensitive transactional logic remains in traditional, auditable code paths (Python/Lex) rather than probabilistic prompts.
+
