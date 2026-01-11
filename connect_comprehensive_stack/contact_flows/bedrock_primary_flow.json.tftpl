@@ -90,68 +90,80 @@
       "Identifier": "GatewayBot",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "LoopPrompt",
+        "NextAction": "GatewayBot",
         "Conditions": [
           {
-            "NextAction": "TransferToQueue",
+            "NextAction": "SetQueueForTransfer",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["TransferToAgent"]
-            }
+            },
+            "ConditionType": "IntentName"
           },
           {
             "NextAction": "BankingBot",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["CheckBalance"]
-            }
+            },
+            "ConditionType": "IntentName"
           },
           {
             "NextAction": "BankingBot",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["TransferMoney"]
-            }
+            },
+            "ConditionType": "IntentName"
           },
           {
             "NextAction": "BankingBot",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["GetStatement"]
-            }
+            },
+            "ConditionType": "IntentName"
           },
           {
             "NextAction": "BankingBot",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["CancelDirectDebit"]
-            }
+            },
+            "ConditionType": "IntentName"
           },
           {
             "NextAction": "BankingBot",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["CancelStandingOrder"]
-            }
+            },
+            "ConditionType": "IntentName"
           },
           {
             "NextAction": "SalesBot",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["ProductInfo"]
-            }
+            },
+            "ConditionType": "IntentName"
           },
           {
             "NextAction": "SalesBot",
             "Condition": {
               "Operator": "Equals",
               "Operands": ["Pricing"]
-            }
+            },
+            "ConditionType": "IntentName"
           }
         ],
         "Errors": [
            {
-            "NextAction": "Disconnect",
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingCondition"
+           },
+           {
+            "NextAction": "SetQueueForTransfer",
             "ErrorType": "NoMatchingError"
            }
         ]
@@ -166,17 +178,22 @@
       "Identifier": "BankingBot",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "LoopPrompt",
+        "NextAction": "BankingBot",
         "Conditions": [
           {
-             "NextAction": "TransferToQueue",
+             "NextAction": "SetQueueForTransfer",
              "Condition": {
               "Operator": "Equals",
               "Operands": ["TransferToAgent"]
-            }
+            },
+            "ConditionType": "IntentName"
           }
         ],
         "Errors": [
+          {
+            "NextAction": "LoopPrompt",
+            "ErrorType": "NoMatchingCondition"
+          },
           {
             "NextAction": "LoopPrompt",
             "ErrorType": "NoMatchingError"
@@ -193,17 +210,22 @@
       "Identifier": "SalesBot",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "LoopPrompt",
+        "NextAction": "SalesBot",
         "Conditions": [
           {
-             "NextAction": "TransferToQueue",
+             "NextAction": "SetQueueForTransfer",
              "Condition": {
               "Operator": "Equals",
               "Operands": ["TransferToAgent"]
-            }
+            },
+            "ConditionType": "IntentName"
           }
         ],
         "Errors": [
+          {
+            "NextAction": "LoopPrompt",
+            "ErrorType": "NoMatchingCondition"
+          },
           {
             "NextAction": "LoopPrompt",
             "ErrorType": "NoMatchingError"
@@ -219,18 +241,58 @@
       "Type": "MessageParticipant",
       "Transitions": {
         "NextAction": "GatewayBot",
-        "Errors": []
+        "Attributes": {
+          "handover_source": "$.Channel",
+          "conversation_summary": "Customer requested agent transfer",
+          "last_intent": "$.Intent",
+          "sentiment_score": "$.Sentiment.Score",
+          "bot_name": "$.BotName"
+        }
+      },
+      "Identifier": "SetHandoverAttributes",
+      "Type": "UpdateContactAttributes",
+      "Transitions": {
+        "NextAction": "SetQueueForTransfer",
+        "Errors": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
       }
     },
     {
       "Parameters": {
         "QueueId": "${queue_arn}"
       },
+      "Identifier": "SetQueueForTransfer",
+      "Type": "UpdateContactTargetQueue",
+      "Transitions": {
+        "NextAction": "TransferToQueue",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {},
       "Identifier": "TransferToQueue",
       "Type": "TransferContactToQueue",
       "Transitions": {
         "NextAction": "Disconnect",
-        "Errors": []
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+          },
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "QueueAtCapacity"
+          }
+        ]
       }
     },
     {

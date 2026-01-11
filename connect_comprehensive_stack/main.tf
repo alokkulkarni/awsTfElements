@@ -2145,13 +2145,17 @@ resource "aws_connect_contact_flow" "bedrock_primary" {
   description = "Simplified Bedrock flow with Lex integration"
   type        = "CONTACT_FLOW"
   content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
-    lex_bot_alias_arn = awscc_lex_bot_alias.this.arn
-    queue_arn         = aws_connect_queue.queues["GeneralAgentQueue"].arn
+    lex_bot_alias_arn         = awscc_lex_bot_alias.this.arn
+    lex_bot_banking_alias_arn = awscc_lex_bot_alias.banking.arn
+    lex_bot_sales_alias_arn   = awscc_lex_bot_alias.sales.arn
+    queue_arn                 = aws_connect_queue.queues["GeneralAgentQueue"].arn
   })
   tags = var.tags
 
   depends_on = [
     awscc_lex_bot_alias.this,
+    awscc_lex_bot_alias.banking,
+    awscc_lex_bot_alias.sales,
     null_resource.lex_bot_association,
     null_resource.validate_bot_alias
   ]
