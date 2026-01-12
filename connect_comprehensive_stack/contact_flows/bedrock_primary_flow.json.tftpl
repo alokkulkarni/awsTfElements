@@ -3,68 +3,195 @@
   "StartAction": "InitialGreeting",
   "Metadata": {
     "entryPointPosition": {
-      "x": 20,
-      "y": 20
+      "x": -292,
+      "y": -96.8
     },
     "ActionMetadata": {
       "InitialGreeting": {
         "position": {
-          "x": 180,
-          "y": 20
-        }
-      },
-      "GatewayBot": {
-        "position": {
-          "x": 400,
-          "y": 20
-        },
-        "parameters": {
-          "LexV2Bot": {
-            "AliasArn": "${lex_bot_alias_arn}"
-          }
-        }
-      },
-      "BankingBot": {
-        "position": {
-          "x": 700,
-          "y": 200
-        },
-        "parameters": {
-          "LexV2Bot": {
-            "AliasArn": "${lex_bot_banking_alias_arn}"
-          }
+          "x": -116,
+          "y": -97.6
         }
       },
       "SalesBot": {
         "position": {
-          "x": 700,
-          "y": 400
+          "x": 859.2,
+          "y": 407.2
         },
         "parameters": {
           "LexV2Bot": {
             "AliasArn": "${lex_bot_sales_alias_arn}"
           }
+        },
+        "lexV2BotName": "",
+        "conditionMetadata": [
+          {
+            "id": "f09207d4-2ffe-4336-b0be-67effd8849ba",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferToAgent"
+          }
+        ]
+      },
+      "BankingBot": {
+        "position": {
+          "x": 852,
+          "y": -148.8
+        },
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": "${lex_bot_banking_alias_arn}"
+          }
+        },
+        "lexV2BotName": "",
+        "conditionMetadata": [
+          {
+            "id": "ac0d4800-46cc-4e5c-9ea7-6fb2de6a0f8b",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferToAgent"
+          }
+        ]
+      },
+      "GatewayBot": {
+        "position": {
+          "x": 162.4,
+          "y": -122.4
+        },
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": "${lex_bot_alias_arn}"
+          }
+        },
+        "dynamicMetadata": {
+          "x-amz-lex:audio:start-timeout-ms": false
+        },
+        "lexV2BotName": "",
+        "conditionMetadata": [
+          {
+            "id": "1a4f4ee1-48c2-456d-bbda-4b5e79b92d19",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferToAgent"
+          },
+          {
+            "id": "a554a614-7835-4b30-bece-05e0a18fa13e",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "CheckBalance"
+          },
+          {
+            "id": "788c0ea6-b8b4-4d24-bf49-a8b3004336b1",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferMoney"
+          },
+          {
+            "id": "2605ab39-2a90-44ce-8c41-583a1aa2fabc",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "GetStatement"
+          },
+          {
+            "id": "ae2604cd-c05a-47cc-8158-07283c2b8015",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "CancelDirectDebit"
+          },
+          {
+            "id": "5f4cbd9e-3a75-4005-97ed-556c296a7e45",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "CancelStandingOrder"
+          },
+          {
+            "id": "e0bfd068-ed41-426d-9a04-6ddf10d43b73",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "ProductInfo"
+          },
+          {
+            "id": "30489d42-f700-461f-ba58-538fd8b59a63",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "Pricing"
+          }
+        ]
+      },
+      "SetHandoverAttributes": {
+        "position": {
+          "x": 1307.2,
+          "y": 508.8
+        },
+        "dynamicParams": []
+      },
+      "SetQueueForTransfer": {
+        "position": {
+          "x": 1352,
+          "y": 26.4
         }
       },
-      "TransferToQueue": {
+      "9b21978c-31a8-478d-93d9-8845ccfba2dc": {
         "position": {
-          "x": 1000,
-          "y": 300
+          "x": 1646.4,
+          "y": -44.8
         }
       },
       "Disconnect": {
         "position": {
-          "x": 1000,
-          "y": 100
+          "x": 2641.6,
+          "y": 337.6
         }
       },
-      "LoopPrompt": {
+      "da4f04bc-4467-4bdf-9647-3bfb6ebbf422": {
         "position": {
-          "x": 400,
-          "y": 300
+          "x": 1944,
+          "y": -120.8
+        }
+      },
+      "TransferToQueue": {
+        "position": {
+          "x": 2272.8,
+          "y": 52.8
         }
       }
-    }
+    },
+    "Annotations": [],
+    "name": "",
+    "description": "",
+    "type": "contactFlow",
+    "status": null,
+    "hash": {}
   },
   "Actions": [
     {
@@ -74,98 +201,39 @@
       "Identifier": "InitialGreeting",
       "Type": "MessageParticipant",
       "Transitions": {
-        "NextAction": "GatewayBot",
-        "Errors": []
+        "NextAction": "GatewayBot"
       }
     },
     {
       "Parameters": {
         "LexV2Bot": {
-          "AliasArn": "${lex_bot_alias_arn}"
-        },
-        "LexSessionAttributes": {
-          "x-amz-lex:audio:start-timeout-ms": "5000"
+          "AliasArn": "${lex_bot_sales_alias_arn}"
         }
       },
-      "Identifier": "GatewayBot",
+      "Identifier": "SalesBot",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "GatewayBot",
+        "NextAction": "SetHandoverAttributes",
         "Conditions": [
           {
-            "NextAction": "SetQueueForTransfer",
+            "NextAction": "SetHandoverAttributes",
             "Condition": {
               "Operator": "Equals",
-              "Operands": ["TransferToAgent"]
-            },
-            "ConditionType": "IntentName"
-          },
-          {
-            "NextAction": "BankingBot",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["CheckBalance"]
-            },
-            "ConditionType": "IntentName"
-          },
-          {
-            "NextAction": "BankingBot",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["TransferMoney"]
-            },
-            "ConditionType": "IntentName"
-          },
-          {
-            "NextAction": "BankingBot",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["GetStatement"]
-            },
-            "ConditionType": "IntentName"
-          },
-          {
-            "NextAction": "BankingBot",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["CancelDirectDebit"]
-            },
-            "ConditionType": "IntentName"
-          },
-          {
-            "NextAction": "BankingBot",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["CancelStandingOrder"]
-            },
-            "ConditionType": "IntentName"
-          },
-          {
-            "NextAction": "SalesBot",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["ProductInfo"]
-            },
-            "ConditionType": "IntentName"
-          },
-          {
-            "NextAction": "SalesBot",
-            "Condition": {
-              "Operator": "Equals",
-              "Operands": ["Pricing"]
-            },
-            "ConditionType": "IntentName"
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
           }
         ],
         "Errors": [
-           {
-            "NextAction": "SetQueueForTransfer",
+          {
+            "NextAction": "SetHandoverAttributes",
             "ErrorType": "NoMatchingCondition"
-           },
-           {
-            "NextAction": "SetQueueForTransfer",
+          },
+          {
+            "NextAction": "SetHandoverAttributes",
             "ErrorType": "NoMatchingError"
-           }
+          }
         ]
       }
     },
@@ -178,24 +246,25 @@
       "Identifier": "BankingBot",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "BankingBot",
+        "NextAction": "SetHandoverAttributes",
         "Conditions": [
           {
-             "NextAction": "SetQueueForTransfer",
-             "Condition": {
+            "NextAction": "SetHandoverAttributes",
+            "Condition": {
               "Operator": "Equals",
-              "Operands": ["TransferToAgent"]
-            },
-            "ConditionType": "IntentName"
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
           }
         ],
         "Errors": [
           {
-            "NextAction": "LoopPrompt",
+            "NextAction": "SetHandoverAttributes",
             "ErrorType": "NoMatchingCondition"
           },
           {
-            "NextAction": "LoopPrompt",
+            "NextAction": "SetHandoverAttributes",
             "ErrorType": "NoMatchingError"
           }
         ]
@@ -203,31 +272,98 @@
     },
     {
       "Parameters": {
+        "LexSessionAttributes": {
+          "x-amz-lex:audio:start-timeout-ms": "5000"
+        },
         "LexV2Bot": {
-          "AliasArn": "${lex_bot_sales_alias_arn}"
+          "AliasArn": "${lex_bot_alias_arn}"
         }
       },
-      "Identifier": "SalesBot",
+      "Identifier": "GatewayBot",
       "Type": "ConnectParticipantWithLexBot",
       "Transitions": {
-        "NextAction": "SalesBot",
+        "NextAction": "SetQueueForTransfer",
         "Conditions": [
           {
-             "NextAction": "SetQueueForTransfer",
-             "Condition": {
+            "NextAction": "SetQueueForTransfer",
+            "Condition": {
               "Operator": "Equals",
-              "Operands": ["TransferToAgent"]
-            },
-            "ConditionType": "IntentName"
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CheckBalance"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferMoney"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "GetStatement"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CancelDirectDebit"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CancelStandingOrder"
+              ]
+            }
+          },
+          {
+            "NextAction": "SalesBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "ProductInfo"
+              ]
+            }
+          },
+          {
+            "NextAction": "SalesBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "Pricing"
+              ]
+            }
           }
         ],
         "Errors": [
           {
-            "NextAction": "LoopPrompt",
+            "NextAction": "SetQueueForTransfer",
             "ErrorType": "NoMatchingCondition"
           },
           {
-            "NextAction": "LoopPrompt",
+            "NextAction": "SetQueueForTransfer",
             "ErrorType": "NoMatchingError"
           }
         ]
@@ -235,19 +371,8 @@
     },
     {
       "Parameters": {
-        "Text": "Is there anything else I can help you with?"
-      },
-      "Identifier": "LoopPrompt",
-      "Type": "MessageParticipant",
-      "Transitions": {
-        "NextAction": "GatewayBot",
-        "Attributes": {
-          "handover_source": "$.Channel",
-          "conversation_summary": "Customer requested agent transfer",
-          "last_intent": "$.Intent",
-          "sentiment_score": "$.Sentiment.Score",
-          "bot_name": "$.BotName"
-        }
+        "Attributes": {},
+        "TargetContact": "Current"
       },
       "Identifier": "SetHandoverAttributes",
       "Type": "UpdateContactAttributes",
@@ -263,10 +388,52 @@
     },
     {
       "Parameters": {
-        "QueueId": "${queue_arn}"
+        "QueueId": ""
       },
       "Identifier": "SetQueueForTransfer",
       "Type": "UpdateContactTargetQueue",
+      "Transitions": {
+        "NextAction": "9b21978c-31a8-478d-93d9-8845ccfba2dc",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "CallbackNumber": "$.StoredCustomerInput"
+      },
+      "Identifier": "9b21978c-31a8-478d-93d9-8845ccfba2dc",
+      "Type": "UpdateContactCallbackNumber",
+      "Transitions": {
+        "NextAction": "da4f04bc-4467-4bdf-9647-3bfb6ebbf422",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "InvalidCallbackNumber"
+          },
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "CallbackNumberNotDialable"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {},
+      "Identifier": "Disconnect",
+      "Type": "DisconnectParticipant",
+      "Transitions": {}
+    },
+    {
+      "Parameters": {
+        "Text": "You will be called back when the next agent is available."
+      },
+      "Identifier": "da4f04bc-4467-4bdf-9647-3bfb6ebbf422",
+      "Type": "MessageParticipant",
       "Transitions": {
         "NextAction": "TransferToQueue",
         "Errors": [
@@ -278,28 +445,23 @@
       }
     },
     {
-      "Parameters": {},
+      "Parameters": {
+        "RetryDelaySeconds": "600",
+        "InitialCallDelaySeconds": "5",
+        "MaximumConnectionAttempts": "1",
+        "CallbackMode": "AgentFirst"
+      },
       "Identifier": "TransferToQueue",
-      "Type": "TransferContactToQueue",
+      "Type": "CreateCallbackContact",
       "Transitions": {
-        "NextAction": "Disconnect",
+        "NextAction": "",
         "Errors": [
           {
             "NextAction": "Disconnect",
             "ErrorType": "NoMatchingError"
-          },
-          {
-            "NextAction": "Disconnect",
-            "ErrorType": "QueueAtCapacity"
           }
         ]
       }
-    },
-    {
-      "Parameters": {},
-      "Identifier": "Disconnect",
-      "Type": "DisconnectParticipant",
-      "Transitions": {}
     }
   ]
 }

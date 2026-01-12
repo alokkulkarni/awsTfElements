@@ -1,0 +1,204 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "InitialGreeting",
+  "Actions": [
+    {
+      "Parameters": {
+        "Text": "Hello! Welcome to the Federated Banking Assistant. How can I help you today?"
+      },
+      "Identifier": "InitialGreeting",
+      "Type": "MessageParticipant",
+      "Transitions": {
+        "NextAction": "GatewayBot"
+      }
+    },
+    {
+      "Parameters": {
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_sales_alias_arn}"
+        }
+      },
+      "Identifier": "SalesBot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "SetQueueForTransfer",
+        "Conditions": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_banking_alias_arn}"
+        }
+      },
+      "Identifier": "BankingBot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "SetQueueForTransfer",
+        "Conditions": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "LexV2Bot": {
+          "AliasArn": "${lex_bot_alias_arn}"
+        }
+      },
+      "Identifier": "GatewayBot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "SetQueueForTransfer",
+        "Conditions": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CheckBalance"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferMoney"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "GetStatement"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CancelDirectDebit"
+              ]
+            }
+          },
+          {
+            "NextAction": "BankingBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CancelStandingOrder"
+              ]
+            }
+          },
+          {
+            "NextAction": "SalesBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "ProductInfo"
+              ]
+            }
+          },
+          {
+            "NextAction": "SalesBot",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "Pricing"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "SetQueueForTransfer",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "QueueId": "${queue_arn}"
+      },
+      "Identifier": "SetQueueForTransfer",
+      "Type": "TransferContactToQueue",
+      "Transitions": {
+        "NextAction": "Disconnect",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+          },
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "QueueAtCapacity"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {},
+      "Identifier": "Disconnect",
+      "Type": "DisconnectParticipant",
+      "Transitions": {}
+    }
+  ]
+}
