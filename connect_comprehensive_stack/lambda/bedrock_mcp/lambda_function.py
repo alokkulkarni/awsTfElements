@@ -1007,7 +1007,7 @@ def format_response_for_lex(bedrock_response: Dict[str, Any], final_response: st
             },
             "intent": {
                 "name": "FallbackIntent",
-                "state": "Fulfilled"
+                "state": "InProgress"
             },
             "sessionAttributes": session_attributes
         },
@@ -1378,8 +1378,8 @@ def lambda_handler(event, context):
                         "type": "ElicitIntent"
                     },
                     "intent": {
-                        "name": intent_name,
-                        "state": "Fulfilled"
+                        "name": "FallbackIntent",
+                        "state": "InProgress"
                     },
                     "sessionAttributes": session_attributes
                 },

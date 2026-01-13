@@ -79,35 +79,36 @@ resource "aws_connect_phone_number" "toll_free" {
 # for AI-powered conversation with Bedrock and intelligent agent transfer.
 # ==============================================================
 # Associate Phone Numbers with Contact Flow (Inbound)
-resource "null_resource" "associate_phone_numbers" {
-  triggers = {
-    instance_id     = module.connect_instance.id
-    contact_flow_id = aws_connect_contact_flow.bedrock_primary.contact_flow_id
-    outbound_id     = aws_connect_phone_number.outbound.id
-    toll_free_id    = aws_connect_phone_number.toll_free.id
-    region          = var.region
-  }
-
-  provisioner "local-exec" {
-    command = "aws connect associate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.outbound_id} --contact-flow-id ${self.triggers.contact_flow_id} --region ${self.triggers.region}"
-  }
-
-  provisioner "local-exec" {
-    command = "aws connect associate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --contact-flow-id ${self.triggers.contact_flow_id} --region ${self.triggers.region}"
-  }
-
-  provisioner "local-exec" {
-    when    = destroy
-    command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.outbound_id} --region ${self.triggers.region} || true"
-  }
-
-  provisioner "local-exec" {
-    when    = destroy
-    command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --region ${self.triggers.region} || true"
-  }
-  
-  depends_on = [aws_connect_contact_flow.bedrock_primary]
-}
+# COMMENTED OUT: Contact flow will be created manually from console
+# resource "null_resource" "associate_phone_numbers" {
+#   triggers = {
+#     instance_id     = module.connect_instance.id
+#     contact_flow_id = aws_connect_contact_flow.bedrock_primary.contact_flow_id
+#     outbound_id     = aws_connect_phone_number.outbound.id
+#     toll_free_id    = aws_connect_phone_number.toll_free.id
+#     region          = var.region
+#   }
+#
+#   provisioner "local-exec" {
+#     command = "aws connect associate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.outbound_id} --contact-flow-id ${self.triggers.contact_flow_id} --region ${self.triggers.region}"
+#   }
+#
+#   provisioner "local-exec" {
+#     command = "aws connect associate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --contact-flow-id ${self.triggers.contact_flow_id} --region ${self.triggers.region}"
+#   }
+#
+#   provisioner "local-exec" {
+#     when    = destroy
+#     command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.outbound_id} --region ${self.triggers.region} || true"
+#   }
+#
+#   provisioner "local-exec" {
+#     when    = destroy
+#     command = "aws connect disassociate-phone-number-contact-flow --instance-id ${self.triggers.instance_id} --phone-number-id ${self.triggers.toll_free_id} --region ${self.triggers.region} || true"
+#   }
+#   
+#   depends_on = [aws_connect_contact_flow.bedrock_primary]
+# }
 
 # Connect Storage Configuration
 resource "aws_connect_instance_storage_config" "chat_transcripts" {
@@ -468,7 +469,9 @@ module "callback_dispatcher" {
     CALLBACK_TABLE_NAME         = module.callback_table.name
     INSTANCE_ID                 = module.connect_instance.id
     OUTBOUND_QUEUE_ID           = aws_connect_queue.queues["GeneralAgentQueue"].queue_id
-    OUTBOUND_CONTACT_FLOW_ID    = aws_connect_contact_flow.bedrock_primary.contact_flow_id
+    # OUTBOUND_CONTACT_FLOW_ID will need to be set manually after creating contact flow from console
+    # OUTBOUND_CONTACT_FLOW_ID    = aws_connect_contact_flow.bedrock_primary.contact_flow_id
+    OUTBOUND_CONTACT_FLOW_ID    = ""  # Set this manually after creating BedrockPrimaryFlow from console
     OUTBOUND_SOURCE_PHONE       = aws_connect_phone_number.outbound.phone_number
     TASK_CONTACT_FLOW_ID        = aws_connect_contact_flow.callback_task.contact_flow_id
     LOG_LEVEL                   = "INFO"
@@ -1266,7 +1269,7 @@ resource "null_resource" "update_fallback_intent_en_gb" {
       
       echo "  Found FallbackIntent ID: $INTENT_ID"
       
-      # Update the FallbackIntent to enable both hooks
+      # Update the FallbackIntent to enable both hooks and set postFulfillmentStatusSpecification
       aws lexv2-models update-intent \
         --bot-id ${self.triggers.bot_id} \
         --bot-version DRAFT \
@@ -1276,6 +1279,8 @@ resource "null_resource" "update_fallback_intent_en_gb" {
         --parent-intent-signature "AMAZON.FallbackIntent" \
         --fulfillment-code-hook enabled=true \
         --dialog-code-hook enabled=true \
+        --intent-closing-setting '{"closingResponse":{"messageGroupsList":[{"message":{"plainTextMessage":{"value":"Thank you for contacting us."}}}]},"isActive":false}' \
+        --intent-confirmation-setting '{"isActive":false,"declinationResponse":{"messageGroupsList":[{"message":{"plainTextMessage":{"value":"Okay, let me know if you need anything else."}}}]}}' \
         --region ${self.triggers.region}
       
       echo "✅ FallbackIntent for en_GB updated successfully"
@@ -1337,7 +1342,7 @@ resource "null_resource" "update_fallback_intent_en_us" {
       
       echo "  Found FallbackIntent ID: $INTENT_ID"
       
-      # Update the FallbackIntent to enable both hooks
+      # Update the FallbackIntent to enable both hooks and set postFulfillmentStatusSpecification
       aws lexv2-models update-intent \
         --bot-id ${self.triggers.bot_id} \
         --bot-version DRAFT \
@@ -1347,6 +1352,8 @@ resource "null_resource" "update_fallback_intent_en_us" {
         --parent-intent-signature "AMAZON.FallbackIntent" \
         --fulfillment-code-hook enabled=true \
         --dialog-code-hook enabled=true \
+        --intent-closing-setting '{"closingResponse":{"messageGroupsList":[{"message":{"plainTextMessage":{"value":"Thank you for contacting us."}}}]},"isActive":false}' \
+        --intent-confirmation-setting '{"isActive":false,"declinationResponse":{"messageGroupsList":[{"message":{"plainTextMessage":{"value":"Okay, let me know if you need anything else."}}}]}}' \
         --region ${self.triggers.region}
       
       echo "✅ FallbackIntent for en_US updated successfully"
@@ -2139,27 +2146,28 @@ resource "aws_connect_contact_flow" "chat_entry" {
 #      b) TransferToAgent intent → transfer to agent queue
 # 5. Agent queue manages customer while waiting
 # =============================================================
-resource "aws_connect_contact_flow" "bedrock_primary" {
-  instance_id = module.connect_instance.id
-  name        = "BedrockPrimaryFlow"
-  description = "Simplified Bedrock flow with Lex integration"
-  type        = "CONTACT_FLOW"
-  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
-    lex_bot_alias_arn         = awscc_lex_bot_alias.this.arn
-    lex_bot_banking_alias_arn = awscc_lex_bot_alias.banking.arn
-    lex_bot_sales_alias_arn   = awscc_lex_bot_alias.sales.arn
-    queue_arn                 = aws_connect_queue.queues["GeneralAgentQueue"].arn
-  })
-  tags = var.tags
-
-  depends_on = [
-    awscc_lex_bot_alias.this,
-    awscc_lex_bot_alias.banking,
-    awscc_lex_bot_alias.sales,
-    null_resource.lex_bot_association,
-    null_resource.validate_bot_alias
-  ]
-}
+# COMMENTED OUT: Contact flow will be created manually from console
+# resource "aws_connect_contact_flow" "bedrock_primary" {
+#   instance_id = module.connect_instance.id
+#   name        = "BedrockPrimaryFlow"
+#   description = "Simplified Bedrock flow with Lex integration"
+#   type        = "CONTACT_FLOW"
+#   content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
+#     lex_bot_alias_arn         = awscc_lex_bot_alias.this.arn
+#     lex_bot_banking_alias_arn = awscc_lex_bot_alias.banking.arn
+#     lex_bot_sales_alias_arn   = awscc_lex_bot_alias.sales.arn
+#     queue_arn                 = aws_connect_queue.queues["GeneralAgentQueue"].arn
+#   })
+#   tags = var.tags
+#
+#   depends_on = [
+#     awscc_lex_bot_alias.this,
+#     awscc_lex_bot_alias.banking,
+#     awscc_lex_bot_alias.sales,
+#     null_resource.lex_bot_association,
+#     null_resource.validate_bot_alias
+#   ]
+# }
 
 # Customer Queue Flow - Plays while customer waits with position updates and callback option
 # COMMENTED OUT: AWS Connect validation failing - requires manual creation or further investigation
