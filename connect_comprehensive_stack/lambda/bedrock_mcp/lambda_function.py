@@ -913,7 +913,7 @@ REMEMBER: You are Emma Thompson having a CONVERSATION with a customer on the bra
     tools = get_tool_definitions()
     
     # Use inference profile ARN for cross-region on-demand access
-    model_id = os.environ.get("BEDROCK_MODEL_ID", "arn:aws:bedrock:us-east-1:395402194296:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+    model_id = os.environ.get("BEDROCK_MODEL_ID", "arn:aws:bedrock:eu-west-2:395402194296:inference-profile/global.anthropic.claude-sonnet-4-5-20250929-v1:0")
     
     # Convert messages to Converse API format
     converse_messages = []
@@ -1484,7 +1484,7 @@ def lambda_handler(event, context):
                     })
             
             # Make another call to Bedrock Converse API with tool results
-            model_id = os.environ.get("BEDROCK_MODEL_ID", "arn:aws:bedrock:us-east-1:395402194296:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+            model_id = os.environ.get("BEDROCK_MODEL_ID", "arn:aws:bedrock:eu-west-2:395402194296:inference-profile/global.anthropic.claude-sonnet-4-5-20250929-v1:0")
             
             logger.info(f"Calling Bedrock with {len(converse_messages)} messages including tool results")
             
