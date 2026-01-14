@@ -2159,28 +2159,28 @@ resource "aws_connect_contact_flow" "chat_entry" {
 #      b) TransferToAgent intent → transfer to agent queue
 # 5. Agent queue manages customer while waiting
 # =============================================================
-# COMMENTED OUT: Contact flow will be created manually from console
-# resource "aws_connect_contact_flow" "bedrock_primary" {
-#   instance_id = module.connect_instance.id
-#   name        = "BedrockPrimaryFlow"
-#   description = "Simplified Bedrock flow with Lex integration"
-#   type        = "CONTACT_FLOW"
-#   content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
-#     lex_bot_alias_arn         = awscc_lex_bot_alias.this.arn
-#     lex_bot_banking_alias_arn = awscc_lex_bot_alias.banking.arn
-#     lex_bot_sales_alias_arn   = awscc_lex_bot_alias.sales.arn
-#     queue_arn                 = aws_connect_queue.queues["GeneralAgentQueue"].arn
-#   })
-#   tags = var.tags
-#
-#   depends_on = [
-#     awscc_lex_bot_alias.this,
-#     awscc_lex_bot_alias.banking,
-#     awscc_lex_bot_alias.sales,
-#     null_resource.lex_bot_association,
-#     null_resource.validate_bot_alias
-#   ]
-# }
+# BedrockPrimaryFlow - AI-first routing with Lambda/Bedrock integration
+resource "aws_connect_contact_flow" "bedrock_primary" {
+  instance_id = module.connect_instance.id
+  name        = "BedrockPrimaryFlow"
+  description = "AI-first routing flow with Lex/Lambda/Bedrock integration for intelligent call routing"
+  type        = "CONTACT_FLOW"
+  content = templatefile("${path.module}/contact_flows/bedrock_primary_flow.json.tftpl", {
+    lex_bot_alias_arn         = awscc_lex_bot_alias.this.arn
+    lex_bot_banking_alias_arn = awscc_lex_bot_alias.banking.arn
+    lex_bot_sales_alias_arn   = awscc_lex_bot_alias.sales.arn
+    queue_arn                 = aws_connect_queue.queues["GeneralAgentQueue"].arn
+  })
+  tags = var.tags
+
+  depends_on = [
+    awscc_lex_bot_alias.this,
+    awscc_lex_bot_alias.banking,
+    awscc_lex_bot_alias.sales,
+    null_resource.lex_bot_association,
+    null_resource.validate_bot_alias
+  ]
+}
 
 # Customer Queue Flow - Plays while customer waits with position updates and callback option
 # COMMENTED OUT: AWS Connect validation failing - requires manual creation or further investigation

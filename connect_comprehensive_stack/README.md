@@ -4,7 +4,9 @@ This Terraform stack deploys a complete Amazon Connect environment with a Bedroc
 
 ## Features
 - **Amazon Connect**: Core contact center instance with Contact Lens, Flow Logs, and comprehensive queue management.
+- **AI-First Routing**: BedrockPrimaryFlow uses Lambda to analyze caller intent and dynamically route to specialized bots or queues - no hardcoded intent matching in contact flows.
 - **Federated Hybrid Architecture**: A "Hub and Spoke" design where a Gateway Bot routes to specialized Bedrock for general queries or dedicated Sub-Bots (Banking, Sales) for deterministic workflows.
+- **Intelligent Session Management**: Lambda sets `routing_bot` session attribute (BankingBot/SalesBot/TransferToAgent) which Connect reads to dynamically route calls after bot interaction completes.
 - **Data Lake & Analytics**: Serverless data pipeline (Kinesis -> Firehose -> S3 -> Athena) for deep analysis of:
     - Contact Trace Records (CTRs)
     - Agent Events
@@ -85,7 +87,24 @@ The primary fulfillment Lambda function that:
 - Executes FastMCP 2.0 tools for account opening, debit cards, and branch location
 - Validates responses using the ValidationAgent to detect hallucinations
 - Detects handover needs and initiates agent transfer when required
+- **Sets routing_bot session attribute** (BankingBot, SalesBot, or TransferToAgent) for Connect to route intelligently
 - Returns formatted responses to Lex for delivery to the customer
+
+### AI-First Routing Architecture
+The BedrockPrimaryFlow contact flow implements intelligent routing:
+
+1. **GatewayBot (Lex)**: All user input routes to FallbackIntent → Lambda
+2. **Lambda Analysis**: Claude 3.5 Sonnet analyzes intent and determines routing:
+   - Banking intents (CheckBalance, GetStatement, etc.) → `routing_bot=BankingBot`
+   - Sales intents (NewProduct, Pricing) → `routing_bot=SalesBot`
+   - Agent handover needs → `routing_bot=TransferToAgent`
+3. **Contact Flow Routing**: After bot closes (`dialogAction.type=Close`), Compare block checks `$.Lex.SessionAttributes.routing_bot` and routes accordingly
+4. **No Hardcoded Intent Matching**: Contact flows never check intent names - all routing decisions made by AI in Lambda
+
+This architecture allows:
+- **Flexible Intent Detection**: Add new intents without modifying contact flows
+- **Context-Aware Routing**: AI considers conversation history and user frustration
+- **Dynamic Queue Assignment**: Lambda determines target queue based on conversation context
 
 ### FastMCP 2.0 Tools
 Four intelligent tools provide banking information:

@@ -76,7 +76,7 @@ output "hallucination_logs_table_name" {
   value       = module.hallucination_logs_table.name
 }
 
-# output "bedrock_primary_flow_id" {
-#   description = "The ID of the Bedrock Primary contact flow"
-#   value       = aws_connect_contact_flow.bedrock_primary.contact_flow_id
-# }
+output "bedrock_primary_flow_id" {
+  description = "The ID of the Bedrock Primary contact flow with AI-first routing"
+  value       = aws_connect_contact_flow.bedrock_primary.contact_flow_id
+}

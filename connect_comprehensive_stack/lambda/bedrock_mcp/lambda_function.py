@@ -1230,26 +1230,32 @@ def initiate_specialized_bot_transfer(intent_name: str, user_message: str) -> Di
     
     logger.info(f"[ROUTING] Setting routing_bot attribute to: {routing_bot}")
     
+    # Set attributes at top level for Connect to access
+    session_attrs = {
+        "lex_intent": intent_name,
+        "routing_bot": routing_bot,
+        "routing_reason": "specialized_bot_routing",
+        "original_utterance": user_message
+    }
+    
+    logger.info(f"[ROUTING] Returning Close with routing_bot={routing_bot} - Connect will read from session attributes")
+    
     return {
         "sessionState": {
             "dialogAction": {
-                "type": "Close"
+                "type": "Close"  # End bot interaction so Connect can route
             },
             "intent": {
-                "name": intent_name,
+                "name": "FallbackIntent",
                 "state": "Fulfilled"
             },
-            "sessionAttributes": {
-                "lex_intent": intent_name,
-                "routing_bot": routing_bot,
-                "routing_reason": "specialized_bot_routing",
-                "original_utterance": user_message
-            }
+            "sessionAttributes": session_attrs
         },
+        "sessionAttributes": session_attrs,  # Also set at top level for Connect
         "messages": [
             {
                 "contentType": "PlainText",
-                "content": f"I can definitely help you with that. Connecting you now..."
+                "content": f"Connecting you now..."
             }
         ]
     }
@@ -1283,22 +1289,28 @@ def initiate_agent_handover(conversation_history: List[Dict], handover_reason: s
     
     message = handover_messages.get(handover_reason, handover_messages["explicit_request"])
     
+    session_attrs = {
+        "conversation_summary": json.dumps(conversation_summary),
+        "handover_reason": handover_reason,
+        "lex_intent": "TransferToAgent",
+        "routing_bot": "TransferToAgent",  # Set routing attribute for Compare block
+        "target_queue_arn": target_queue_arn
+    }
+    
+    logger.info(f"[ROUTING] Agent handover - setting routing_bot=TransferToAgent")
+    
     return {
         "sessionState": {
             "dialogAction": {
-                "type": "Close"
+                "type": "Close"  # End bot interaction
             },
             "intent": {
-                "name": "TransferToAgent",
+                "name": "FallbackIntent",
                 "state": "Fulfilled"
             },
-            "sessionAttributes": {
-                "conversation_summary": json.dumps(conversation_summary),
-                "handover_reason": handover_reason,
-                "lex_intent": "TransferToAgent",
-                "target_queue_arn": target_queue_arn
-            }
+            "sessionAttributes": session_attrs
         },
+        "sessionAttributes": session_attrs,  # Also set at top level
         "messages": [
             {
                 "contentType": "PlainText",
