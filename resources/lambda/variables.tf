@@ -1,5 +1,24 @@
 variable "filename" {
-  type = string
+  type    = string
+  default = null
+}
+
+variable "s3_bucket" {
+  description = "S3 bucket where deployment package is stored (for packages > 50MB)"
+  type        = string
+  default     = null
+}
+
+variable "s3_key" {
+  description = "S3 key of deployment package (for packages > 50MB)"
+  type        = string
+  default     = null
+}
+
+variable "s3_object_version" {
+  description = "S3 object version ID (for versioned buckets)"
+  type        = string
+  default     = null
 }
 
 variable "function_name" {

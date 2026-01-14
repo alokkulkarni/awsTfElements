@@ -674,18 +674,18 @@ resource "aws_cloudwatch_log_group" "bedrock_mcp" {
 }
 
 module "bedrock_mcp_lambda" {
-  source        = "../resources/lambda"
-  filename      = data.archive_file.bedrock_mcp_zip.output_path
-  function_name = "${var.project_name}-bedrock-mcp"
-  role_arn      = aws_iam_role.lambda_role.arn
-  handler       = var.bedrock_mcp_lambda.handler
-  runtime       = var.bedrock_mcp_lambda.runtime
-  timeout       = var.bedrock_mcp_lambda.timeout
-  memory_size   = 1024
-  architectures = ["arm64"]
-  publish       = true
+  source           = "../resources/lambda"
+  filename         = data.archive_file.bedrock_mcp_zip.output_path
+  function_name    = "${var.project_name}-bedrock-mcp"
+  role_arn         = aws_iam_role.lambda_role.arn
+  handler          = var.bedrock_mcp_lambda.handler
+  runtime          = var.bedrock_mcp_lambda.runtime
+  timeout          = var.bedrock_mcp_lambda.timeout
+  memory_size      = 1024
+  architectures    = ["arm64"]
+  publish          = true
 
-  # Use archive hash to trigger Lambda code updates deterministically
+  # Use archive hash to trigger Lambda code updates
   source_code_hash = data.archive_file.bedrock_mcp_zip.output_base64sha256
 
   environment_variables = merge({
@@ -1157,8 +1157,9 @@ resource "aws_lexv2models_bot_locale" "en_us" {
   }
 }
 
-# Create ChatIntent for en_US locale (required to build locale)
+# ChatIntent for en_US - DISABLED, using FallbackIntent for all routing
 resource "aws_lexv2models_intent" "chat_en_us" {
+  count       = 0  # Disabled - FallbackIntent handles all user inputs
   bot_id      = module.lex_bot.bot_id
   bot_version = "DRAFT"
   locale_id   = "en_US"
@@ -1166,12 +1167,6 @@ resource "aws_lexv2models_intent" "chat_en_us" {
   
   sample_utterance {
     utterance = "Hi"
-  }
-  sample_utterance {
-    utterance = "Hello"
-  }
-  sample_utterance {
-    utterance = "I need help"
   }
 
   fulfillment_code_hook {
@@ -1193,6 +1188,16 @@ resource "aws_lexv2models_intent" "transfer_to_agent_en_gb" {
   name        = "TransferToAgent"
   description = "Intent returned by Lambda to signal agent transfer is needed"
 
+  sample_utterance {
+    utterance = "transfer to an agent"
+  }
+  sample_utterance {
+    utterance = "speak to someone"
+  }
+  sample_utterance {
+    utterance = "I need human help"
+  }
+
   fulfillment_code_hook {
     enabled = false
   }
@@ -1207,6 +1212,16 @@ resource "aws_lexv2models_intent" "transfer_to_agent_en_us" {
   locale_id   = "en_US"
   name        = "TransferToAgent"
   description = "Intent returned by Lambda to signal agent transfer is needed"
+
+  sample_utterance {
+    utterance = "transfer to an agent"
+  }
+  sample_utterance {
+    utterance = "speak to someone"
+  }
+  sample_utterance {
+    utterance = "I need human help"
+  }
 
   fulfillment_code_hook {
     enabled = false
@@ -1223,8 +1238,7 @@ resource "null_resource" "update_fallback_intent_en_gb" {
     bot_id    = module.lex_bot.bot_id
     locale_id = var.locale
     region    = var.region
-    # Force update when ChatIntent changes to ensure FallbackIntent is updated after locale build
-    chat_intent_id = module.lex_bot.chat_intent_id
+    timestamp = timestamp()
   }
 
   provisioner "local-exec" {
@@ -1296,8 +1310,7 @@ resource "null_resource" "update_fallback_intent_en_us" {
     bot_id    = module.lex_bot.bot_id
     locale_id = "en_US"
     region    = var.region
-    # Force update when ChatIntent changes to ensure FallbackIntent is updated after locale build
-    chat_intent_id = aws_lexv2models_intent.chat_en_us.id
+    timestamp = timestamp()
   }
 
   provisioner "local-exec" {

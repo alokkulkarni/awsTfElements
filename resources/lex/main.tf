@@ -64,7 +64,7 @@ resource "aws_lexv2models_bot_locale" "this" {
 
 
 resource "aws_lexv2models_intent" "chat" {
-  count       = var.enable_chat_intent ? 1 : 0
+  count       = 0  # Disabled - using FallbackIntent to catch all user inputs
   bot_id      = aws_lexv2models_bot.this.id
   bot_version = "DRAFT"
   locale_id   = aws_lexv2models_bot_locale.this.locale_id
@@ -72,12 +72,6 @@ resource "aws_lexv2models_intent" "chat" {
   
   sample_utterance {
     utterance = "Hi"
-  }
-  sample_utterance {
-    utterance = "Hello"
-  }
-  sample_utterance {
-    utterance = "I need help"
   }
 
   fulfillment_code_hook {

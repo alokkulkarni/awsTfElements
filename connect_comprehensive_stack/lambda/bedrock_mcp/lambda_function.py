@@ -1216,8 +1216,19 @@ def detect_specialized_intent(user_message: str) -> tuple:
 def initiate_specialized_bot_transfer(intent_name: str, user_message: str) -> Dict[str, Any]:
     """
     Return a response that signals Connect to transition to a specialized Lex bot.
+    Sets the intent name directly so Connect flow can route based on it.
     """
     logger.info(f"[ROUTING] Transferring to specialized bot with intent: {intent_name}")
+    
+    # Determine which bot to route to based on intent
+    if intent_name in ["CheckBalance", "GetStatement", "CancelStandingOrder", "CancelDirectDebit", "TransferFunds"]:
+        routing_bot = "BankingBot"
+    elif intent_name in ["NewProduct", "Pricing"]:
+        routing_bot = "SalesBot"
+    else:
+        routing_bot = "Unknown"
+    
+    logger.info(f"[ROUTING] Setting routing_bot attribute to: {routing_bot}")
     
     return {
         "sessionState": {
@@ -1230,6 +1241,7 @@ def initiate_specialized_bot_transfer(intent_name: str, user_message: str) -> Di
             },
             "sessionAttributes": {
                 "lex_intent": intent_name,
+                "routing_bot": routing_bot,
                 "routing_reason": "specialized_bot_routing",
                 "original_utterance": user_message
             }
@@ -1237,7 +1249,7 @@ def initiate_specialized_bot_transfer(intent_name: str, user_message: str) -> Di
         "messages": [
             {
                 "contentType": "PlainText",
-                "content": f"I can definitely help you with that. Transferring you to our secure {intent_name.replace('Check', 'Checking ').replace('Get', 'Statement ')} system."
+                "content": f"I can definitely help you with that. Connecting you now..."
             }
         ]
     }

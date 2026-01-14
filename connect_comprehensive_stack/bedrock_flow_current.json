@@ -1,0 +1,342 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "InitialGreeting",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": -288.8,
+      "y": 97.6
+    },
+    "ActionMetadata": {
+      "9b21978c-31a8-478d-93d9-8845ccfba2dc": {
+        "position": {
+          "x": 1224.8,
+          "y": -86.4
+        }
+      },
+      "da4f04bc-4467-4bdf-9647-3bfb6ebbf422": {
+        "position": {
+          "x": 1507.2,
+          "y": -143.2
+        }
+      },
+      "TransferToQueue": {
+        "position": {
+          "x": 1888,
+          "y": -179.2
+        }
+      },
+      "Disconnect": {
+        "position": {
+          "x": 2064.8,
+          "y": 297.6
+        }
+      },
+      "InitialGreeting": {
+        "position": {
+          "x": -120.8,
+          "y": 96.8
+        }
+      },
+      "GatewayBot": {
+        "position": {
+          "x": 152,
+          "y": 92.8
+        },
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": {
+              "displayName": "prod",
+              "useLexBotDropdown": true,
+              "lexV2BotName": "connect-comprehensive-bot"
+            }
+          }
+        },
+        "dynamicMetadata": {
+          "x-amz-lex:audio:start-timeout-ms": false
+        },
+        "useLexBotDropdown": true,
+        "lexV2BotName": "connect-comprehensive-bot",
+        "lexV2BotAliasName": "prod",
+        "conditionMetadata": [
+          {
+            "id": "374d9574-f3f0-42db-8526-f3ffb8b5fbc2",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferToAgent"
+          }
+        ]
+      },
+      "BankingBot": {
+        "position": {
+          "x": 604,
+          "y": -150.4
+        },
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": {
+              "displayName": "prod",
+              "useLexBotDropdown": true,
+              "lexV2BotName": "connect-comprehensive-banking-bot"
+            }
+          }
+        },
+        "useLexBotDropdown": true,
+        "lexV2BotName": "connect-comprehensive-banking-bot",
+        "lexV2BotAliasName": "prod",
+        "conditionMetadata": [
+          {
+            "id": "ce7ca8c2-bd02-4112-b679-dce7b1fd2a2c",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferToAgent"
+          }
+        ]
+      },
+      "SetQueueForTransfer": {
+        "position": {
+          "x": 948.8,
+          "y": 65.6
+        },
+        "parameters": {
+          "QueueId": {
+            "displayName": "BasicQueue"
+          }
+        },
+        "queue": {
+          "text": "BasicQueue"
+        }
+      },
+      "SalesBot": {
+        "position": {
+          "x": 581.6,
+          "y": 278.4
+        },
+        "parameters": {
+          "LexV2Bot": {
+            "AliasArn": {
+              "displayName": "prod",
+              "useLexBotDropdown": true,
+              "lexV2BotName": "connect-comprehensive-sales-bot"
+            }
+          }
+        },
+        "useLexBotDropdown": true,
+        "lexV2BotName": "connect-comprehensive-sales-bot",
+        "lexV2BotAliasName": "prod",
+        "conditionMetadata": [
+          {
+            "id": "a227e6b3-8239-4f95-a570-8588259e448e",
+            "operator": {
+              "name": "Equals",
+              "value": "Equals",
+              "shortDisplay": "="
+            },
+            "value": "TransferToAgent"
+          }
+        ]
+      }
+    },
+    "Annotations": []
+  },
+  "Actions": [
+    {
+      "Parameters": {
+        "CallbackNumber": "$.StoredCustomerInput"
+      },
+      "Identifier": "9b21978c-31a8-478d-93d9-8845ccfba2dc",
+      "Type": "UpdateContactCallbackNumber",
+      "Transitions": {
+        "NextAction": "da4f04bc-4467-4bdf-9647-3bfb6ebbf422",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "InvalidCallbackNumber"
+          },
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "CallbackNumberNotDialable"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Text": "You will be called back when the next agent is available."
+      },
+      "Identifier": "da4f04bc-4467-4bdf-9647-3bfb6ebbf422",
+      "Type": "MessageParticipant",
+      "Transitions": {
+        "NextAction": "TransferToQueue",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "RetryDelaySeconds": "600",
+        "InitialCallDelaySeconds": "5",
+        "MaximumConnectionAttempts": "1",
+        "CallbackMode": "AgentFirst"
+      },
+      "Identifier": "TransferToQueue",
+      "Type": "CreateCallbackContact",
+      "Transitions": {
+        "NextAction": "Disconnect",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {},
+      "Identifier": "Disconnect",
+      "Type": "DisconnectParticipant",
+      "Transitions": {}
+    },
+    {
+      "Parameters": {
+        "Text": "Hello! Welcome to the Federated Banking Assistant. How can I help you today?"
+      },
+      "Identifier": "InitialGreeting",
+      "Type": "MessageParticipant",
+      "Transitions": {
+        "NextAction": "GatewayBot"
+      }
+    },
+    {
+      "Parameters": {
+        "Text": "Hi, How may i help u?",
+        "LexV2Bot": {
+          "AliasArn": "arn:aws:lex:eu-west-2:395402194296:bot-alias/9FY9LC8OAB/QJMA5R3DQS"
+        },
+        "LexSessionAttributes": {
+          "x-amz-lex:audio:start-timeout-ms": "15000"
+        }
+      },
+      "Identifier": "GatewayBot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "GatewayBot",
+        "Conditions": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "GatewayBot",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "GatewayBot",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Text": "Hi, How can i help you with your banking queries?",
+        "LexV2Bot": {
+          "AliasArn": "arn:aws:lex:eu-west-2:395402194296:bot-alias/VQT6MVREWL/LV4U9JFYNF"
+        }
+      },
+      "Identifier": "BankingBot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "BankingBot",
+        "Conditions": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "BankingBot",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "BankingBot",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "QueueId": "arn:aws:connect:eu-west-2:395402194296:instance/05f9a713-ef59-432e-8535-43aad0148e7b/queue/93149217-1605-40e4-a7a9-872566878399"
+      },
+      "Identifier": "SetQueueForTransfer",
+      "Type": "UpdateContactTargetQueue",
+      "Transitions": {
+        "NextAction": "9b21978c-31a8-478d-93d9-8845ccfba2dc",
+        "Errors": [
+          {
+            "NextAction": "Disconnect",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Parameters": {
+        "Text": "Hi, How can i help you with your Product queries?",
+        "LexV2Bot": {
+          "AliasArn": "arn:aws:lex:eu-west-2:395402194296:bot-alias/LDLHZAHC3S/G6HZ96QVBF"
+        }
+      },
+      "Identifier": "SalesBot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Transitions": {
+        "NextAction": "SalesBot",
+        "Conditions": [
+          {
+            "NextAction": "SetQueueForTransfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "TransferToAgent"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "SalesBot",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "SalesBot",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    }
+  ]
+}
+

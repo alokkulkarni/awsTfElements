@@ -1,2 +1,2 @@
-boto3>=1.34.0
-fastmcp==2.0.0
+# Lightweight version - no heavy dependencies
+# boto3 is already available in Lambda runtime

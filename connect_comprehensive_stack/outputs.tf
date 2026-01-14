@@ -26,6 +26,16 @@ output "lex_bot_name" {
   value       = module.lex_bot.bot_name
 }
 
+output "lex_bot_alias_id" {
+  description = "The ID of the main Lex Bot alias"
+  value       = awscc_lex_bot_alias.this.bot_alias_id
+}
+
+output "lex_bot_alias_arn" {
+  description = "The ARN of the main Lex Bot alias"
+  value       = awscc_lex_bot_alias.this.arn
+}
+
 output "s3_bucket_name" {
   description = "The name of the S3 bucket for storage"
   value       = module.connect_storage_bucket.id
