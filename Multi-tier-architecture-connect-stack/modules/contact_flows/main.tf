@@ -39,11 +39,11 @@
 
 resource "local_file" "main_flow_template" {
   filename = "${path.module}/flows/main_flow.json"
-  content  = jsonencode({
+  content = jsonencode({
     Version     = "2019-10-30"
     StartAction = "placeholder"
     Actions     = []
-    Settings    = {
+    Settings = {
       InputParameters  = []
       OutputParameters = []
       Transitions      = []
@@ -53,11 +53,11 @@ resource "local_file" "main_flow_template" {
 
 resource "local_file" "customer_queue_flow_template" {
   filename = "${path.module}/flows/customer_queue_flow.json"
-  content  = jsonencode({
+  content = jsonencode({
     Version     = "2019-10-30"
     StartAction = "placeholder"
     Actions     = []
-    Settings    = {
+    Settings = {
       InputParameters  = []
       OutputParameters = []
       Transitions      = []
@@ -67,11 +67,11 @@ resource "local_file" "customer_queue_flow_template" {
 
 resource "local_file" "callback_flow_template" {
   filename = "${path.module}/flows/callback_flow.json"
-  content  = jsonencode({
+  content = jsonencode({
     Version     = "2019-10-30"
     StartAction = "placeholder"
     Actions     = []
-    Settings    = {
+    Settings = {
       InputParameters  = []
       OutputParameters = []
       Transitions      = []

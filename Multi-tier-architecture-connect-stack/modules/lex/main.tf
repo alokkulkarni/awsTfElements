@@ -11,17 +11,17 @@ data "aws_caller_identity" "current" {}
 # ============================================================================
 resource "aws_lexv2models_bot" "bots" {
   for_each = var.lex_bots
-  
+
   name                        = "${var.project_name}-${var.environment}-${each.key}-bot"
   role_arn                    = var.lex_role_arn
   idle_session_ttl_in_seconds = each.value.idle_session_ttl
-  
+
   data_privacy {
     child_directed = false
   }
-  
+
   description = each.value.description
-  
+
   tags = merge(
     var.tags,
     {
@@ -36,62 +36,75 @@ resource "aws_lexv2models_bot" "bots" {
 # ============================================================================
 resource "aws_lexv2models_bot_locale" "locales" {
   for_each = var.lex_bots
-  
+
   bot_id      = aws_lexv2models_bot.bots[each.key].id
   bot_version = "DRAFT"
   locale_id   = each.value.locale
-  
+
   n_lu_intent_confidence_threshold = 0.4
-  
+
   voice_settings {
     voice_id = each.value.voice_id
   }
-  
+
   depends_on = [aws_lexv2models_bot.bots]
 }
 
 # ============================================================================
 # Bot Versions
 # ============================================================================
+resource "time_sleep" "wait_for_bot_locale" {
+  depends_on = [
+    aws_lexv2models_bot_locale.locales,
+    aws_lexv2models_intent.intents
+  ]
+
+  create_duration = "10s"
+}
+
 resource "aws_lexv2models_bot_version" "prod" {
   for_each = var.lex_bots
-  
+
   bot_id = aws_lexv2models_bot.bots[each.key].id
   locale_specification = {
     (each.value.locale) = {
       source_bot_version = "DRAFT"
     }
   }
-  
+
   description = "Production version"
-  
+
   depends_on = [
-    aws_lexv2models_bot_locale.locales,
-    aws_lexv2models_intent.intents
+    time_sleep.wait_for_bot_locale
   ]
-  
+
   lifecycle {
     create_before_destroy = true
   }
 }
 
+resource "time_sleep" "wait_for_prod_versions" {
+  depends_on = [aws_lexv2models_bot_version.prod]
+
+  create_duration = "10s"
+}
+
 resource "aws_lexv2models_bot_version" "test" {
   for_each = var.lex_bots
-  
+
   bot_id = aws_lexv2models_bot.bots[each.key].id
   locale_specification = {
     (each.value.locale) = {
       source_bot_version = "DRAFT"
     }
   }
-  
+
   description = "Test version"
-  
+
   depends_on = [
-    aws_lexv2models_bot_locale.locales,
-    aws_lexv2models_intent.intents
+    time_sleep.wait_for_prod_versions
   ]
-  
+
   lifecycle {
     create_before_destroy = true
   }
@@ -172,13 +185,23 @@ locals {
           "I want to know about products",
           "I'm interested in sales",
           "Can you help me",
-          "I have a question"
+          "I have a question",
+          "Connect me to banking",
+          "I need product information",
+          "Talk to sales team",
+          "Help me with my account",
+          "I want to speak to someone about products",
+          "Transfer me to banking department",
+          "I need assistance with sales",
+          "Can I talk to a specialist",
+          "Get me help with products",
+          "I need banking support"
         ]
       },
       {
-        name        = "FallbackIntent"
-        description = "Fallback to Bedrock agent"
-        sample_utterances = []
+        name                    = "FallbackIntent"
+        description             = "Fallback to Bedrock agent"
+        sample_utterances       = []
         parent_intent_signature = "AMAZON.FallbackIntent"
       }
     ]
@@ -190,7 +213,13 @@ locals {
           "What is my account balance",
           "Check my balance",
           "How much money do I have",
-          "Show me my account balance"
+          "Show me my account balance",
+          "What's my current balance",
+          "Tell me my balance",
+          "How much do I have in my account",
+          "Can you check my balance",
+          "I need to know my balance",
+          "Display my account balance"
         ]
       },
       {
@@ -200,7 +229,13 @@ locals {
           "Show my recent transactions",
           "What are my latest transactions",
           "Transaction history",
-          "Recent account activity"
+          "Recent account activity",
+          "Show me my transaction history",
+          "What transactions have I made",
+          "List my recent purchases",
+          "Display my account activity",
+          "Show last month's transactions",
+          "What did I spend money on"
         ]
       },
       {
@@ -210,7 +245,13 @@ locals {
           "I want to open an account",
           "How do I open a new account",
           "Account opening",
-          "Create new account"
+          "Create new account",
+          "I'd like to open a bank account",
+          "Start a new account",
+          "Open a savings account",
+          "How can I create an account",
+          "New account setup",
+          "I need to open an account"
         ]
       },
       {
@@ -220,7 +261,13 @@ locals {
           "Find nearest branch",
           "Where is your branch",
           "Branch locations",
-          "Bank near me"
+          "Bank near me",
+          "Closest branch location",
+          "Find a branch nearby",
+          "Where can I find your bank",
+          "Branch finder",
+          "Locate nearest branch",
+          "Show me branch addresses"
         ]
       },
       {
@@ -230,7 +277,13 @@ locals {
           "My card is not working",
           "Card issue",
           "Problem with my card",
-          "Card blocked"
+          "Card blocked",
+          "My debit card isn't working",
+          "Card declined",
+          "I can't use my card",
+          "Card not functioning",
+          "Report card problem",
+          "Card error"
         ]
       }
     ]
@@ -242,7 +295,13 @@ locals {
           "Tell me about your products",
           "Product information",
           "What products do you offer",
-          "I need product details"
+          "I need product details",
+          "Show me your products",
+          "What do you sell",
+          "Product catalog",
+          "List your products",
+          "Available products",
+          "What items are available"
         ]
       },
       {
@@ -252,7 +311,13 @@ locals {
           "Compare products",
           "What's the difference between",
           "Product comparison",
-          "Which product is better"
+          "Which product is better",
+          "Compare these products",
+          "Help me choose between products",
+          "Difference between products",
+          "Which one should I get",
+          "Compare features",
+          "Product versus product"
         ]
       },
       {
@@ -262,7 +327,13 @@ locals {
           "What features does it have",
           "Product features",
           "Tell me about the features",
-          "What can it do"
+          "What can it do",
+          "What are the features",
+          "Describe the features",
+          "Feature list",
+          "What does this product offer",
+          "Product capabilities",
+          "Specifications"
         ]
       },
       {
@@ -272,7 +343,13 @@ locals {
           "Is the product available",
           "Do you have this in stock",
           "Product availability",
-          "When will it be available"
+          "When will it be available",
+          "Is this in stock",
+          "Can I get this product",
+          "Check availability",
+          "Do you have it",
+          "Stock status",
+          "Is it available now"
         ]
       }
     ]
@@ -284,7 +361,13 @@ locals {
           "I want to open an account",
           "New account",
           "Sign up for an account",
-          "Create an account"
+          "Create an account",
+          "I'd like to start an account",
+          "Register for an account",
+          "Open new account",
+          "Account registration",
+          "Start new account",
+          "I need a new account"
         ]
       },
       {
@@ -294,7 +377,13 @@ locals {
           "Upgrade my account",
           "I want premium account",
           "Account upgrade",
-          "Switch to better plan"
+          "Switch to better plan",
+          "Upgrade to premium",
+          "Change my account type",
+          "Move to premium account",
+          "Upgrade my plan",
+          "I want to upgrade",
+          "Better account options"
         ]
       },
       {
@@ -304,7 +393,13 @@ locals {
           "What offers do you have",
           "Special offers",
           "Any promotions",
-          "Current deals"
+          "Current deals",
+          "What promotions are available",
+          "Do you have any discounts",
+          "Special deals",
+          "What's on offer",
+          "Available promotions",
+          "Current specials"
         ]
       },
       {
@@ -314,12 +409,18 @@ locals {
           "How much does it cost",
           "Pricing",
           "What's the price",
-          "Cost information"
+          "Cost information",
+          "How much is it",
+          "What are your prices",
+          "Price details",
+          "Cost details",
+          "What does it cost",
+          "Pricing information"
         ]
       }
     ]
   }
-  
+
   # Flatten intents for resource creation
   all_intents = flatten([
     for bot_key, bot in var.lex_bots : [
@@ -331,7 +432,7 @@ locals {
       }
     ]
   ])
-  
+
   intents_map = {
     for item in local.all_intents :
     "${item.bot_key}-${item.intent_name}" => item
@@ -339,26 +440,29 @@ locals {
 }
 
 resource "aws_lexv2models_intent" "intents" {
-  for_each = local.intents_map
-  
+  for_each = {
+    for k, v in local.intents_map : k => v
+    if v.intent_name != "FallbackIntent" # Exclude FallbackIntent as it's a built-in intent
+  }
+
   bot_id      = aws_lexv2models_bot.bots[each.value.bot_key].id
   bot_version = "DRAFT"
   locale_id   = each.value.locale
   name        = each.value.intent_name
   description = each.value.intent_data.description
-  
+
   parent_intent_signature = lookup(each.value.intent_data, "parent_intent_signature", null)
-  
+
   dynamic "sample_utterance" {
     for_each = lookup(each.value.intent_data, "sample_utterances", [])
     content {
       utterance = sample_utterance.value
     }
   }
-  
+
   fulfillment_code_hook {
     enabled = true
   }
-  
+
   depends_on = [aws_lexv2models_bot_locale.locales]
 }

@@ -3,13 +3,13 @@ variable "connect_instance_id" {
   type        = string
 }
 
-variable "bot_aliases" {
-  description = "Map of bot aliases to associate with Connect"
+variable "bot_versions" {
+  description = "Map of bot versions (prod and test) to associate with Connect"
   type = map(object({
-    bot_id       = string
-    bot_alias_id = string
-    bot_name     = string
+    bot_id      = string
+    bot_version = string
   }))
+  default = {}
 }
 
 variable "lambda_functions" {

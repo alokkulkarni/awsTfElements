@@ -7,7 +7,7 @@
 # AWS Connect IAM Role
 # ============================================================================
 resource "aws_iam_role" "connect" {
-  name               = "${var.project_name}-${var.environment}-connect-role"
+  name = "${var.project_name}-${var.environment}-connect-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -20,14 +20,14 @@ resource "aws_iam_role" "connect" {
       }
     ]
   })
-  
+
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "connect_policy" {
   name = "${var.project_name}-${var.environment}-connect-policy"
   role = aws_iam_role.connect.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -53,25 +53,104 @@ resource "aws_iam_role_policy" "connect_policy" {
         Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
         ]
         Resource = "arn:aws:logs:${var.region}:*:log-group:/aws/connect/*"
       },
       {
+        Sid    = "S3GeneralStorageAccess"
         Effect = "Allow"
         Action = [
           "s3:GetObject",
           "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:PutObjectAcl"
         ]
-        Resource = "arn:aws:s3:::${var.project_name}-${var.environment}-connect-storage/*"
+        Resource = "arn:aws:s3:::${var.project_name}-${var.environment}-connect-storage-*/*"
       },
       {
+        Sid    = "S3ListBuckets"
         Effect = "Allow"
         Action = [
-          "s3:ListBucket"
+          "s3:ListBucket",
+          "s3:GetBucketLocation"
         ]
-        Resource = "arn:aws:s3:::${var.project_name}-${var.environment}-connect-storage"
+        Resource = [
+          "arn:aws:s3:::${var.project_name}-${var.environment}-connect-storage-*",
+          "arn:aws:s3:::${var.project_name}-${var.environment}-original-transcripts-*",
+          "arn:aws:s3:::${var.project_name}-${var.environment}-redacted-transcripts-*"
+        ]
+      },
+      {
+        Sid    = "S3OriginalTranscriptsWrite"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl"
+        ]
+        Resource = "arn:aws:s3:::${var.project_name}-${var.environment}-original-transcripts-*/*"
+        Condition = {
+          StringEquals = {
+            "s3:x-amz-server-side-encryption" = "aws:kms"
+          }
+        }
+      },
+      {
+        Sid    = "S3RedactedTranscriptsAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:PutObjectAcl"
+        ]
+        Resource = "arn:aws:s3:::${var.project_name}-${var.environment}-redacted-transcripts-*/*"
+      },
+      {
+        Sid    = "ContactLensPermissions"
+        Effect = "Allow"
+        Action = [
+          "connect:StartContactRecording",
+          "connect:StopContactRecording",
+          "connect:StartContactStreaming",
+          "connect:StopContactStreaming"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "KinesisVideoStreamPermissions"
+        Effect = "Allow"
+        Action = [
+          "kinesisvideo:CreateStream",
+          "kinesisvideo:DescribeStream",
+          "kinesisvideo:GetDataEndpoint",
+          "kinesisvideo:PutMedia"
+        ]
+        Resource = "arn:aws:kinesisvideo:${var.region}:${var.account_id}:stream/${var.project_name}-*"
+      },
+      {
+        Sid    = "KMSPermissions"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey"
+        ]
+        Resource = [
+          "arn:aws:kms:${var.region}:${var.account_id}:key/*"
+        ]
+      },
+      {
+        Sid    = "TranscriptAnalysisPermissions"
+        Effect = "Allow"
+        Action = [
+          "transcribe:StartStreamTranscription",
+          "transcribe:StartCallAnalyticsStreamTranscription",
+          "comprehend:DetectPiiEntities",
+          "comprehend:ContainsPiiEntities"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -81,7 +160,7 @@ resource "aws_iam_role_policy" "connect_policy" {
 # Lex Bot IAM Role
 # ============================================================================
 resource "aws_iam_role" "lex" {
-  name               = "${var.project_name}-${var.environment}-lex-role"
+  name = "${var.project_name}-${var.environment}-lex-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -94,14 +173,14 @@ resource "aws_iam_role" "lex" {
       }
     ]
   })
-  
+
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "lex_policy" {
   name = "${var.project_name}-${var.environment}-lex-policy"
   role = aws_iam_role.lex.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -144,7 +223,7 @@ resource "aws_iam_role_policy" "lex_policy" {
 # Lambda Execution IAM Role
 # ============================================================================
 resource "aws_iam_role" "lambda" {
-  name               = "${var.project_name}-${var.environment}-lambda-role"
+  name = "${var.project_name}-${var.environment}-lambda-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -157,14 +236,14 @@ resource "aws_iam_role" "lambda" {
       }
     ]
   })
-  
+
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "lambda_policy" {
   name = "${var.project_name}-${var.environment}-lambda-policy"
   role = aws_iam_role.lambda.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -204,7 +283,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
 # Bedrock Agent IAM Role
 # ============================================================================
 resource "aws_iam_role" "bedrock_agent" {
-  name               = "${var.project_name}-${var.environment}-bedrock-agent-role"
+  name = "${var.project_name}-${var.environment}-bedrock-agent-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -225,14 +304,14 @@ resource "aws_iam_role" "bedrock_agent" {
       }
     ]
   })
-  
+
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "bedrock_agent_policy" {
   name = "${var.project_name}-${var.environment}-bedrock-agent-policy"
   role = aws_iam_role.bedrock_agent.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -267,7 +346,7 @@ resource "aws_iam_role_policy" "bedrock_agent_policy" {
 # Bedrock Agent Knowledge Base IAM Role (if needed for future extensions)
 # ============================================================================
 resource "aws_iam_role" "bedrock_kb" {
-  name               = "${var.project_name}-${var.environment}-bedrock-kb-role"
+  name = "${var.project_name}-${var.environment}-bedrock-kb-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -280,14 +359,14 @@ resource "aws_iam_role" "bedrock_kb" {
       }
     ]
   })
-  
+
   tags = var.tags
 }
 
 resource "aws_iam_role_policy" "bedrock_kb_policy" {
   name = "${var.project_name}-${var.environment}-bedrock-kb-policy"
   role = aws_iam_role.bedrock_kb.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [

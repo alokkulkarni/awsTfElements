@@ -19,10 +19,10 @@ output "lambda_prod_aliases" {
   description = "Map of production Lambda aliases"
   value = {
     for k, v in aws_lambda_alias.prod : k => {
-      arn          = v.arn
+      arn           = v.arn
       function_name = v.function_name
-      name         = v.name
-      version      = v.function_version
+      name          = v.name
+      version       = v.function_version
     }
   }
 }
@@ -31,10 +31,10 @@ output "lambda_test_aliases" {
   description = "Map of test Lambda aliases"
   value = {
     for k, v in aws_lambda_alias.test : k => {
-      arn          = v.arn
+      arn           = v.arn
       function_name = v.function_name
-      name         = v.name
-      version      = v.function_version
+      name          = v.name
+      version       = v.function_version
     }
   }
 }

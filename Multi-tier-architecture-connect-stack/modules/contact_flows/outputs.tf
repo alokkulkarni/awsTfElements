@@ -13,8 +13,8 @@
 output "flow_template_files" {
   description = "Paths to flow template files"
   value = {
-    main_flow          = local_file.main_flow_template.filename
-    customer_queue     = local_file.customer_queue_flow_template.filename
-    callback_flow      = local_file.callback_flow_template.filename
+    main_flow      = local_file.main_flow_template.filename
+    customer_queue = local_file.customer_queue_flow_template.filename
+    callback_flow  = local_file.callback_flow_template.filename
   }
 }

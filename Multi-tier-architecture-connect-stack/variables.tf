@@ -127,9 +127,9 @@ variable "queues" {
 variable "connect_users" {
   description = "Map of Connect users to create with their roles"
   type = map(object({
-    email          = string
-    first_name     = string
-    last_name      = string
+    email            = string
+    first_name       = string
+    last_name        = string
     security_profile = string
     routing_profile  = optional(string, "Basic Routing Profile")
   }))
@@ -142,11 +142,11 @@ variable "connect_users" {
 variable "lex_bots" {
   description = "Map of Lex bots to create"
   type = map(object({
-    description     = string
-    bot_type        = string # concierge or domain
+    description      = string
+    bot_type         = string # concierge or domain
     idle_session_ttl = number
-    locale          = string
-    voice_id        = string
+    locale           = string
+    voice_id         = string
   }))
   default = {}
 }
@@ -181,11 +181,11 @@ variable "lambda_memory_size" {
 variable "lambda_functions" {
   description = "Map of Lambda functions to create for each domain"
   type = map(object({
-    description  = string
-    handler      = string
-    runtime      = optional(string)
-    timeout      = optional(number)
-    memory_size  = optional(number)
+    description      = string
+    handler          = string
+    runtime          = optional(string)
+    timeout          = optional(number)
+    memory_size      = optional(number)
     environment_vars = optional(map(string), {})
   }))
   default = {}
@@ -317,4 +317,19 @@ variable "deploy_integrations" {
   description = "Deploy integration module (bot registration, etc.)"
   type        = bool
   default     = true
+}
+
+# ============================================================================
+# Logging and Auditing Configuration
+# ============================================================================
+variable "enable_cloudtrail" {
+  description = "Enable CloudTrail for auditing and compliance"
+  type        = bool
+  default     = true
+}
+
+variable "cloudwatch_log_retention_days" {
+  description = "CloudWatch log retention in days for all services"
+  type        = number
+  default     = 90
 }
