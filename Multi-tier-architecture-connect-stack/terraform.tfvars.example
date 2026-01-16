@@ -1,0 +1,229 @@
+# ============================================================================
+# Example Configuration - Copy to terraform.tfvars and customize
+# ============================================================================
+
+# General Configuration
+project_name = "contact-center-box"
+environment  = "dev"
+region       = "eu-west-2"
+
+common_tags = {
+  Project     = "ContactCenterInBox"
+  Environment = "dev"
+  ManagedBy   = "Terraform"
+  Owner       = "DevOps"
+}
+
+# Connect Instance Configuration
+connect_instance_alias            = "my-contact-center-unique-alias-123"
+connect_inbound_calls_enabled     = true
+connect_outbound_calls_enabled    = true
+connect_auto_resolve_best_voices  = true
+connect_contact_flow_logs_enabled = true
+connect_contact_lens_enabled      = true
+
+# Phone Number Configuration
+phone_number_country_code = "GB"
+phone_number_type         = "DID"
+phone_number_description  = "Main contact center line"
+
+# Queue Configuration
+queues = {
+  general = {
+    description          = "General inquiries and unclassified contacts"
+    max_contacts         = 10
+    default_outbound_qid = null
+  }
+  banking = {
+    description          = "Banking services and account queries"
+    max_contacts         = 15
+    default_outbound_qid = null
+  }
+  product = {
+    description          = "Product information and specifications"
+    max_contacts         = 10
+    default_outbound_qid = null
+  }
+  sales = {
+    description          = "Sales inquiries and new opportunities"
+    max_contacts         = 12
+    default_outbound_qid = null
+  }
+  callback = {
+    description          = "Customer callback requests"
+    max_contacts         = 5
+    default_outbound_qid = null
+  }
+}
+
+# Connect Users Configuration
+connect_users = {
+  admin = {
+    email            = "admin@example.com"
+    first_name       = "System"
+    last_name        = "Administrator"
+    security_profile = "Admin"
+    routing_profile  = "Basic Routing Profile"
+  }
+  manager = {
+    email            = "manager@example.com"
+    first_name       = "Call Center"
+    last_name        = "Manager"
+    security_profile = "CallCenterManager"
+    routing_profile  = "Basic Routing Profile"
+  }
+  security_officer = {
+    email            = "security@example.com"
+    first_name       = "Security"
+    last_name        = "Officer"
+    security_profile = "SecurityProfile"
+    routing_profile  = "Basic Routing Profile"
+  }
+  agent1 = {
+    email            = "agent1@example.com"
+    first_name       = "Agent"
+    last_name        = "One"
+    security_profile = "Agent"
+    routing_profile  = "Basic Routing Profile"
+  }
+}
+
+# Lex Bot Configuration
+lex_bots = {
+  concierge = {
+    description      = "Primary concierge bot for initial customer interaction"
+    bot_type         = "concierge"
+    idle_session_ttl = 300
+    locale           = "en_GB"
+    voice_id         = "Amy"
+  }
+  banking = {
+    description      = "Banking domain specialist bot"
+    bot_type         = "domain"
+    idle_session_ttl = 300
+    locale           = "en_GB"
+    voice_id         = "Amy"
+  }
+  product = {
+    description      = "Product information specialist bot"
+    bot_type         = "domain"
+    idle_session_ttl = 300
+    locale           = "en_GB"
+    voice_id         = "Amy"
+  }
+  sales = {
+    description      = "Sales specialist bot"
+    bot_type         = "domain"
+    idle_session_ttl = 300
+    locale           = "en_GB"
+    voice_id         = "Amy"
+  }
+}
+
+lex_bot_aliases = ["prod", "test"]
+
+# Lambda Configuration
+lambda_runtime     = "python3.11"
+lambda_timeout     = 30
+lambda_memory_size = 256
+
+lambda_functions = {
+  banking = {
+    description = "Banking domain fulfillment handler"
+    handler     = "index.lambda_handler"
+    runtime     = "python3.11"
+    timeout     = 30
+    memory_size = 256
+    environment_vars = {
+      DOMAIN = "banking"
+    }
+  }
+  product = {
+    description = "Product domain fulfillment handler"
+    handler     = "index.lambda_handler"
+    runtime     = "python3.11"
+    timeout     = 30
+    memory_size = 256
+    environment_vars = {
+      DOMAIN = "product"
+    }
+  }
+  sales = {
+    description = "Sales domain fulfillment handler"
+    handler     = "index.lambda_handler"
+    runtime     = "python3.11"
+    timeout     = 30
+    memory_size = 256
+    environment_vars = {
+      DOMAIN = "sales"
+    }
+  }
+}
+
+# Bedrock Agent Configuration
+bedrock_agent_name        = "banking-assistant-agent"
+bedrock_agent_description = "Banking assistant for intent classification and product information"
+bedrock_foundation_model  = "anthropic.claude-3-sonnet-20240229-v1:0"
+
+bedrock_agent_instruction = <<-EOT
+You are a helpful banking assistant with the following responsibilities:
+
+1. Intent Classification: Accurately classify customer queries into appropriate categories:
+   - Banking: Account inquiries, transactions, balance checks, card issues
+   - Product: Product features, specifications, comparisons
+   - Sales: New accounts, upgrades, special offers
+   - General: All other inquiries
+
+2. Product Information: Provide accurate information about:
+   - Account opening processes and requirements
+   - Different account types and their features
+   - Branch locations and contact information
+   - Online and mobile banking features
+
+3. Query Routing: After classification, provide:
+   - Identified intent category
+   - Confidence level in classification
+   - Recommended queue for routing
+   - Brief summary for agent context
+
+Guidelines:
+- Always maintain professional and courteous communication
+- Protect customer privacy and data security
+- If query is unclear, ask clarifying questions
+- If unable to classify with confidence, route to general queue
+- Never provide specific account details or perform transactions
+- Always verify you have enough context before classification
+EOT
+
+bedrock_guardrail_name                  = "banking-guardrail"
+bedrock_guardrail_description           = "Guardrails for banking assistant agent"
+bedrock_guardrail_blocked_input_message = "I apologize, but I cannot process that request. Please rephrase your question or contact our support team."
+bedrock_guardrail_blocked_output_message = "I apologize, but I cannot provide that information through this channel. Please contact our support team for personalized assistance."
+
+# Contact Flow Configuration
+deploy_contact_flows = false # Set to true after designing flows in console
+
+contact_flows = {
+  main = {
+    description = "Main inbound contact flow"
+    type        = "CONTACT_FLOW"
+    filename    = "flows/main_flow.json"
+  }
+  customer_queue = {
+    description = "Customer queue flow with hold music and announcements"
+    type        = "CUSTOMER_QUEUE"
+    filename    = "flows/customer_queue_flow.json"
+  }
+  callback = {
+    description = "Callback flow for customer callbacks"
+    type        = "CONTACT_FLOW"
+    filename    = "flows/callback_flow.json"
+  }
+}
+
+# Module Deployment Control
+deploy_connect_instance = true
+deploy_lex_bots         = true
+deploy_lambda_functions = true
+deploy_bedrock_agent    = true
+deploy_integrations     = true
